@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Examen Simulador: Líder de Confiabilidad</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body oncontextmenu="return false;" oncopy="return false;" onpaste="return false;" oncut="return false;">
+
+    <div id="login-screen" class="screen active">
+        <div class="login-card">
+            <h1><i class="fas fa-industry"></i> EXAMEN FINAL: CORTE 1</h1>
+            <h2>Simulador de Decisiones y Diagnóstico Industrial</h2>
+            <p>Bienvenido al Centro de Control. Tu misión es analizar situaciones de planta, planificar intervenciones y encontrar causas raíz. Tómalo con calma y analiza cada detalle, un error puede costarte la operación de la planta.</p>
+            <ul class="rules">
+                <li><i class="fas fa-heartbeat"></i> La Integridad empieza al 100% (Nota: 5.0). Cada decisión incorrecta o mal clasificada reducirá la integridad y afectará tu nota directamente.</li>
+                <li><i class="fas fa-clock"></i> Cuentas con <strong>2 horas y 30 minutos</strong> (150 minutos). El tiempo promedio esperado es de 1h 20m. Analiza antes de enviar.</li>
+                <li><i class="fas fa-user-secret"></i> <strong>SISTEMA ANTI-FRAUDE:</strong> Cambiar de pestaña, abrir otras aplicaciones o intentar copiar texto se registra como infracción. A la 3ra infracción, el sistema cierra el examen con la nota obtenida hasta ese momento.</li>
+            </ul>
+            <form id="login-form">
+                <input type="text" id="studentName" placeholder="Nombres y Apellidos" required autocomplete="off">
+                <input type="text" id="studentId" placeholder="Código Estudiantil" required autocomplete="off">
+                <button type="submit" class="btn btn-primary">INICIAR TURNO <i class="fas fa-sign-in-alt"></i></button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN EXAM UI -->
+    <div id="exam-dashboard" class="screen hidden">
+        <header class="dashboard-header">
+            <div class="header-info">
+                <span class="pilot-name">Ing. <span id="display-name"></span></span>
+                <span class="warning-count">Infracciones: <span id="warnings">0</span>/3</span>
+            </div>
+            <div class="header-center">
+                <div class="timer" id="timer">02:30:00</div>
+            </div>
+            <div class="header-health">
+                <span>Integridad (Nota): </span>
+                <div class="health-bar-container">
+                    <div id="health-bar" class="health-bar" style="width: 100%;"></div>
+                </div>
+                <span id="health-text">100%</span>
+                <span id="grade-text" class="gradebadge">5.0</span>
+            </div>
+        </header>
+
+        <main class="dashboard-content">
+
+            <!-- ROOM 1: TIPOS DE MANTENIMIENTO -->
+            <section id="room-1" class="room active">
+                <div class="room-header">
+                    <h2><i class="fas fa-stethoscope"></i> FASE 1: Triaje Operativo y Mantenimiento</h2>
+                    <p>Revisa los siguientes reportes operativos. Identifica el tipo de falla (si aplica) y la táctica de mantenimiento más adecuada para cada situación.</p>
+                </div>
+                
+                <div class="case-card">
+                    <div class="case-number">SITUACIÓN 1</div>
+                    <p class="case-desc">"Bomba centrífuga con aumento gradual de vibración durante los últimos 3 meses tras monitoreo quincenal. No ha perdido su función principal de bombear agua, pero la tendencia indica peligro inminente."</p>
+                    <div class="decisions grid-2">
+                        <div class="decision-group">
+                            <label>1. Tipo de Falla identificada:</label>
+                            <select id="r1-q1a" class="cyber-select">
+                                <option value="">Seleccione...</option>
+                                <option value="evidente">Falla Evidente (Pérdida de función)</option>
+                                <option value="incipiente">Falla Incipiente / Degradación</option>
+                                <option value="oculta">Falla Oculta</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label>2. Mantenimiento aplicado hasta el momento:</label>
+                            <select id="r1-q1b" class="cyber-select">
+                                <option value="">Seleccione...</option>
+                                <option value="predictivo">Mantenimiento Predictivo / Monitoreo</option>
+                                <option value="correctivo">Mantenimiento Correctivo de Emergencia</option>
+                                <option value="preventivo">Mantenimiento Preventivo (Basado en Tiempo)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="case-card">
+                    <div class="case-number">SITUACIÓN 2</div>
+                    <p class="case-desc">"Válvula de alivio de presión (PSV) pegada por óxido interno. Fue descubierta únicamente durante la prueba exigida anual. El equipo de protección no habría funcionado en una emergencia real."</p>
+                    <div class="decisions grid-2">
+                        <div class="decision-group">
+                            <label>3. Tipo de Falla identificada:</label>
+                            <select id="r1-q2a" class="cyber-select">
+                                <option value="">Seleccione...</option>
+                                <option value="evidente">Falla Evidente</option>
+                                <option value="oculta">Falla Oculta</option>
+                                <option value="incipiente">Falla Incipiente</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label>4. La prueba que la descubrió hace parte de un:</label>
+                            <select id="r1-q2b" class="cyber-select">
+                                <option value="">Seleccione...</option>
+                                <option value="predictivo">Mantenimiento Predictivo</option>
+                                <option value="correctivoprog">Mantenimiento Correctivo Programado</option>
+                                <option value="preventivo">Mantenimiento Preventivo (Búsqueda de fallas)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="case-card">
+                    <div class="case-number">SITUACIÓN 3</div>
+                    <p class="case-desc">"Cambio de aceite, correas y filtros de un compresor de aire principal. Se realiza religiosamente cada 5,000 horas de operación sin importar en qué estado visual o de desempeño se encuentre el equipo."</p>
+                    <div class="decisions grid-2">
+                        <div class="decision-group">
+                            <label>5. ¿Qué táctica se está ejecutando en este equipo?</label>
+                            <select id="r1-q3a" class="cyber-select">
+                                <option value="">Seleccione...</option>
+                                <option value="predictivo">Mantenimiento Predictivo (Basado en Condición)</option>
+                                <option value="preventivo_sistematico">Mantenimiento Preventivo Sistemático (Basado en Uso)</option>
+                                <option value="proactivo">Mantenimiento Proactivo / Mejora</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label>6. El objetivo principal de esta táctica elegida es:</label>
+                            <select id="r1-q3b" class="cyber-select">
+                                <option value="">Seleccione...</option>
+                                <option value="restaurar">Restaurar el equipo tras una falla total</option>
+                                <option value="monitorear">Monitorear parámetros para predecir fallo</option>
+                                <option value="mitigar">Mitigar la degradación renovando vida útil</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-action" onclick="app.submitRoom1()">EVALUAR TÁCTICAS (Avanzar a Fase 2) <i class="fas fa-arrow-right"></i></button>
+            </section>
+
+            <!-- ROOM 2: TAREAS DE REPARACION -->
+            <section id="room-2" class="room hidden">
+                <div class="room-header">
+                    <h2><i class="fas fa-wrench"></i> FASE 2: Planificación de Intervención (Planeación y Control)</h2>
+                    <p>El rodamiento principal de un motor eléctrico crítico ha colapsado y debe cambiarse inmediatamente. Como planificador, debes establecer la secuencia lógica y segura de tareas para realizar el Mantenimiento Correctivo.</p>
+                </div>
+                
+                <div class="case-card">
+                    <div class="case-number">ORDEN DE TRABAJO - REEMPLAZO DE RODAMIENTO</div>
+                    <p class="case-desc">Selecciona el paso correspondiente (1 a 6) para cada tarea descrita. Un mal procedimiento puede causar retrasos o, peor aún, accidentes fatales si te equivocas en el aislamiento de energías.</p>
+                    
+                    <div class="decisions">
+                        <div class="decision-group">
+                            <label><i class="fas fa-list-ol"></i> PASO 1 (El más crítico para la seguridad):</label>
+                            <select id="r2-q1" class="cyber-select small-select-wide">
+                                <option value="">Selecciona la tarea inicial...</option>
+                                <option value="t_alinear">Alinear el motor con la carga mecánica empleando equipo láser.</option>
+                                <option value="t_arranque">Remover bloqueos, energizar y prueba de arranque midiendo vibraciones.</option>
+                                <option value="t_desacoplar">Desacoplar mecánicamente el eje del motor de su carga.</option>
+                                <option value="t_aislar">Aislar eléctricamente el motor y aplicar procedimiento LOTO (Bloqueo/Etiquetado).</option>
+                                <option value="t_desmontar">Desarmar carcasas del motor y extraer mecánicamente el rodamiento dañado.</option>
+                                <option value="t_instalar">Instalar el rodamiento nuevo con calentador de inducción evitando golpes.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><i class="fas fa-list-ol"></i> PASO 2 (Desconexión de la carga):</label>
+                            <select id="r2-q2" class="cyber-select small-select-wide">
+                                <option value="">Selecciona la tarea 2...</option>
+                                <option value="t_alinear">Alinear el motor con la carga mecánica empleando equipo láser.</option>
+                                <option value="t_arranque">Remover bloqueos, energizar y prueba de arranque midiendo vibraciones.</option>
+                                <option value="t_desacoplar">Desacoplar mecánicamente el eje del motor de su carga.</option>
+                                <option value="t_aislar">Aislar eléctricamente el motor y aplicar procedimiento LOTO (Bloqueo/Etiquetado).</option>
+                                <option value="t_desmontar">Desarmar carcasas del motor y extraer mecánicamente el rodamiento dañado.</option>
+                                <option value="t_instalar">Instalar el rodamiento nuevo con calentador de inducción evitando golpes.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><i class="fas fa-list-ol"></i> PASO 3 (Acceso a la parte dañada):</label>
+                            <select id="r2-q3" class="cyber-select small-select-wide">
+                                <option value="">Selecciona la tarea 3...</option>
+                                <option value="t_alinear">Alinear el motor con la carga mecánica empleando equipo láser.</option>
+                                <option value="t_arranque">Remover bloqueos, energizar y prueba de arranque midiendo vibraciones.</option>
+                                <option value="t_desacoplar">Desacoplar mecánicamente el eje del motor de su carga.</option>
+                                <option value="t_aislar">Aislar eléctricamente el motor y aplicar procedimiento LOTO (Bloqueo/Etiquetado).</option>
+                                <option value="t_desmontar">Desarmar carcasas del motor y extraer mecánicamente el rodamiento dañado.</option>
+                                <option value="t_instalar">Instalar el rodamiento nuevo con calentador de inducción evitando golpes.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><i class="fas fa-list-ol"></i> PASO 4 (Reemplazo con buena práctica):</label>
+                            <select id="r2-q4" class="cyber-select small-select-wide">
+                                <option value="">Selecciona la tarea 4...</option>
+                                <option value="t_alinear">Alinear el motor con la carga mecánica empleando equipo láser.</option>
+                                <option value="t_arranque">Remover bloqueos, energizar y prueba de arranque midiendo vibraciones.</option>
+                                <option value="t_desacoplar">Desacoplar mecánicamente el eje del motor de su carga.</option>
+                                <option value="t_aislar">Aislar eléctricamente el motor y aplicar procedimiento LOTO (Bloqueo/Etiquetado).</option>
+                                <option value="t_desmontar">Desarmar carcasas del motor y extraer mecánicamente el rodamiento dañado.</option>
+                                <option value="t_instalar">Instalar el rodamiento nuevo con calentador de inducción evitando golpes.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><i class="fas fa-list-ol"></i> PASO 5 (Restablecer posición inicial):</label>
+                            <select id="r2-q5" class="cyber-select small-select-wide">
+                                <option value="">Selecciona la tarea 5...</option>
+                                <option value="t_alinear">Alinear el motor con la carga mecánica empleando equipo láser y reconectar eje.</option>
+                                <option value="t_arranque">Remover bloqueos, energizar y prueba de arranque midiendo vibraciones.</option>
+                                <option value="t_desacoplar">Desacoplar mecánicamente el eje del motor de su carga.</option>
+                                <option value="t_aislar">Aislar eléctricamente el motor y aplicar procedimiento LOTO (Bloqueo/Etiquetado).</option>
+                                <option value="t_desmontar">Desarmar carcasas del motor y extraer mecánicamente el rodamiento dañado.</option>
+                                <option value="t_instalar">Instalar el rodamiento nuevo con calentador de inducción evitando golpes.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><i class="fas fa-list-ol"></i> PASO 6 (Verificación operativa y entrega):</label>
+                            <select id="r2-q6" class="cyber-select small-select-wide">
+                                <option value="">Selecciona la tarea 6...</option>
+                                <option value="t_alinear">Alinear el motor con la carga mecánica empleando equipo láser.</option>
+                                <option value="t_arranque">Remover bloqueos, energizar y prueba de arranque midiendo vibraciones.</option>
+                                <option value="t_desacoplar">Desacoplar mecánicamente el eje del motor de su carga.</option>
+                                <option value="t_aislar">Aislar eléctricamente el motor y aplicar procedimiento LOTO (Bloqueo/Etiquetado).</option>
+                                <option value="t_desmontar">Desarmar carcasas del motor y extraer mecánicamente el rodamiento dañado.</option>
+                                <option value="t_instalar">Instalar el rodamiento nuevo con calentador de inducción evitando golpes.</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-action" onclick="app.submitRoom2()">APROBAR PLANEACIÓN (Avanzar a Fase 3) <i class="fas fa-arrow-right"></i></button>
+            </section>
+
+            <!-- ROOM 3: 5 POR QUE -->
+            <section id="room-3" class="room hidden">
+                <div class="room-header">
+                    <h2><i class="fas fa-question-circle"></i> FASE 3: Análisis Estructural (Los 5 Por Qué)</h2>
+                    <p>Ocurrió un derrame considerable de aceite lubricante inflamable cerca de calderas en la Sala de Bombas P-200. Arma el árbol lógico seleccionando la respuesta correcta a cada "Por Qué" hasta llegar a la Causa Raíz (Latente).</p>
+                </div>
+                
+                <div class="case-card">
+                    <div class="case-number danger-badge">ANOMALÍA PRINCIPAL: Derrame de Aceite Lubricante</div>
+                    <div class="decisions">
+                        <div class="decision-group">
+                            <label><strong>1er ¿Por Qué?</strong> Ocurrió el derrame de aceite lubricante en la bomba...</label>
+                            <select id="r3-q1" class="cyber-select small-select-wide">
+                                <option value="">Elige la causa inmediata...</option>
+                                <option value="pq_desaline">...porque existía mucha desalineación rotacional entre el eje del motor y la bomba.</option>
+                                <option value="pq_laser">...porque el técnico de mantenimiento lo acopló usando solo una regla recta ("a ojo").</option>
+                                <option value="pq_sello">...porque se reventó el sello mecánico principal de contención de la bomba.</option>
+                                <option value="pq_procedimiento">...porque los manuales están desactualizados y no exigen alineación de precisión.</option>
+                                <option value="pq_vibracion">...porque la bomba estuvo operando con niveles críticos de vibración por 3 semanas.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><strong>2do ¿Por Qué?</strong> Ocurrió [tu respuesta anterior]...</label>
+                            <select id="r3-q2" class="cyber-select small-select-wide">
+                                <option value="">Elige la segunda causa lógica...</option>
+                                <option value="pq_desaline">...porque existía mucha desalineación rotacional entre el eje del motor y la bomba.</option>
+                                <option value="pq_laser">...porque el técnico de mantenimiento lo acopló usando solo una regla recta ("a ojo").</option>
+                                <option value="pq_sello">...porque se reventó el sello mecánico principal de contención de la bomba.</option>
+                                <option value="pq_procedimiento">...porque los manuales están desactualizados y no exigen alineación de precisión.</option>
+                                <option value="pq_vibracion">...porque la bomba estuvo operando con niveles críticos de vibración por 3 semanas.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><strong>3er ¿Por Qué?</strong> Ocurrió [tu respuesta anterior]...</label>
+                            <select id="r3-q3" class="cyber-select small-select-wide">
+                                <option value="">Elige la tercera causa lógica...</option>
+                                <option value="pq_desaline">...porque existía mucha desalineación rotacional entre el eje del motor y la bomba.</option>
+                                <option value="pq_laser">...porque el técnico de mantenimiento lo acopló usando solo una regla recta ("a ojo").</option>
+                                <option value="pq_sello">...porque se reventó el sello mecánico principal de contención de la bomba.</option>
+                                <option value="pq_procedimiento">...porque los manuales están desactualizados y no exigen alineación de precisión.</option>
+                                <option value="pq_vibracion">...porque la bomba estuvo operando con niveles críticos de vibración por 3 semanas.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><strong>4to ¿Por Qué?</strong> Ocurrió [tu respuesta anterior]...</label>
+                            <select id="r3-q4" class="cyber-select small-select-wide">
+                                <option value="">Elige la cuarta causa lógica...</option>
+                                <option value="pq_desaline">...porque existía mucha desalineación rotacional entre el eje del motor y la bomba.</option>
+                                <option value="pq_laser">...porque el técnico de mantenimiento lo acopló usando solo una regla recta ("a ojo").</option>
+                                <option value="pq_sello">...porque se reventó el sello mecánico principal de contención de la bomba.</option>
+                                <option value="pq_procedimiento">...porque los manuales están desactualizados y no exigen alineación de precisión.</option>
+                                <option value="pq_vibracion">...porque la bomba estuvo operando con niveles críticos de vibración por 3 semanas.</option>
+                            </select>
+                        </div>
+                        <div class="decision-group">
+                            <label><strong>5to ¿Por Qué? (Causa Raíz Sistémica)</strong> Ocurrió [tu respuesta anterior]...</label>
+                            <select id="r3-q5" class="cyber-select small-select-wide">
+                                <option value="">Elige la causa raíz...</option>
+                                <option value="pq_desaline">...porque existía mucha desalineación rotacional entre el eje del motor y la bomba.</option>
+                                <option value="pq_laser">...porque el técnico de mantenimiento lo acopló usando solo una regla recta ("a ojo").</option>
+                                <option value="pq_sello">...porque se reventó el sello mecánico principal de contención de la bomba.</option>
+                                <option value="pq_procedimiento">...porque los manuales están desactualizados y no exigen alineación de precisión.</option>
+                                <option value="pq_vibracion">...porque la bomba estuvo operando con niveles críticos de vibración por 3 semanas.</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-action" onclick="app.submitRoom3()">ESTABLECER CAUSA RAÍZ (Avanzar a Fase final 4) <i class="fas fa-arrow-right"></i></button>
+            </section>
+
+            <!-- ROOM 4: ISHIKAWA (6M) -->
+            <section id="room-4" class="room hidden">
+                <div class="room-header">
+                    <h2><i class="fas fa-fish"></i> FASE 4: Análisis Macro - Diagrama de Ishikawa (6M)</h2>
+                    <p>Tras la crisis del sistema, recolectamos 12 hallazgos en la investigación (2 correspondientes a cada M de Ishikawa). Ubica estrictamente a qué categoría de las 6M pertenece cada hallazgo. La exactitud de este análisis dictará las soluciones a futuro.</p>
+                </div>
+                
+                <div class="ishikawa-board list-board">
+                    <!-- Fila 1 -->
+                    <div class="pista">
+                        <strong>Hallazgo A:</strong> "El Operador principal inició labores sin recibir inducción del nuevo panel de Siemens."
+                        <select id="r4-q1" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 2 -->
+                    <div class="pista">
+                        <strong>Hallazgo B:</strong> "El termómetro central marcaba 80°C cuando internamente la temperatura real era de 125°C."
+                        <select id="r4-q2" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 3 -->
+                    <div class="pista">
+                        <strong>Hallazgo C:</strong> "El diseño original de la turbina no soporta el aumento de carga que exigió producción este mes."
+                        <select id="r4-q3" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 4 -->
+                    <div class="pista">
+                        <strong>Hallazgo D:</strong> "Los rodamientos sustituidos comprados externamente resultaron ser de lotes piratas de baja dureza."
+                        <select id="r4-q4" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 5 -->
+                    <div class="pista">
+                        <strong>Hallazgo E:</strong> "La brisa marina de las últimas semanas oxidó las barreras de protección del tablero eléctrico debido a la cercanía al mar."
+                        <select id="r4-q5" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 6 -->
+                    <div class="pista">
+                        <strong>Hallazgo F:</strong> "El mecánico encargado tenía una fatiga crónica por haber acumulado 3 turnos nocturnos consecutivos."
+                        <select id="r4-q6" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 7 -->
+                    <div class="pista">
+                        <strong>Hallazgo G:</strong> "El sistema SCADA registraba caudales normales porque el flujómetro estaba fuera de calibración desde el 2022."
+                        <select id="r4-q7" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 8 -->
+                    <div class="pista">
+                        <strong>Hallazgo H:</strong> "El aceite tambor Y-400 venía contaminado con alta presencia de agua desde la fábrica del proveedor logístico."
+                        <select id="r4-q8" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 9 -->
+                    <div class="pista">
+                        <strong>Hallazgo I:</strong> "Nunca existió un paso a paso escrito para encender al calderín de calentamiento en temporadas frías."
+                        <select id="r4-q9" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 10 -->
+                    <div class="pista">
+                        <strong>Hallazgo J:</strong> "La estructura del chasis presentaba desgaste acelerado nativo por cavitación repetitiva en los álabes."
+                        <select id="r4-q10" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 11 -->
+                    <div class="pista">
+                        <strong>Hallazgo K:</strong> "Los ingenieros obviaron el chequeo pre-arranque porque la política de empresa favorecía el tiempo de producción sobre la calidad de armado."
+                        <select id="r4-q11" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                    <!-- Fila 12 -->
+                    <div class="pista">
+                        <strong>Hallazgo L:</strong> "Las constantes tormentas de arena en la zona desértica taponaron los pre-filtros de toma directa en apenas 2 días."
+                        <select id="r4-q12" class="cyber-select small-select mt-2">
+                            <option value="">Selecciona la 'M'</option>
+                            <option value="mano_obra">Mano de Obra / Personal</option>
+                            <option value="maquina">Máquina</option>
+                            <option value="metodo">Método</option>
+                            <option value="materiales">Materiales</option>
+                            <option value="medio_amb">Medio Ambiente</option>
+                            <option value="medicion">Medición</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="final-submit mt-4" style="text-align: center;">
+                    <button class="btn btn-danger btn-lg" onclick="app.finishExam()">ENVIAR REPORTE FINAL Y TERMINAR EXAMEN <i class="fas fa-lock"></i></button>
+                    <p style="margin-top: 10px; font-size: 0.85em; color: var(--text-muted);"><i class="fas fa-info-circle"></i> Al presionar enviar, no habrá vuelta atrás y tu calificación actual será subida a la base de datos.</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL DE MENSAJES -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal">
+            <h2 id="modal-title">Atención</h2>
+            <p id="modal-msg">Mensaje descriptivo</p>
+            <button class="btn btn-primary" onclick="app.closeModal()" id="modal-btn">Continuar</button>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE RESULTADOS -->
+    <div id="result-screen" class="screen hidden" style="justify-content: center; align-items: center; text-align: center;">
+        <div class="login-card" style="width: 100%; max-width: 600px;">
+            <h1 id="final-title"><i class="fas fa-clipboard-check"></i> EXAMEN FINALIZADO</h1>
+            <div class="final-score-box">
+                <p>Nota Final Obtenida:</p>
+                <div id="final-score-display" class="giant-score">5.0</div>
+            </div>
+            <p id="final-feedback" class="mt-4" style="font-size: 1.2rem; margin-bottom: 2rem;">...</p>
+            
+            <div id="sending-status">
+                <i class="fas fa-spinner fa-spin"></i> Guardando resultados de forma segura en Google Sheets...
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

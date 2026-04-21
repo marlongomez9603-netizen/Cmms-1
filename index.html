@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MaintPro CMMS — Sistema de Gestión de Mantenimiento</title>
+  <meta name="description" content="Sistema CMMS educativo para gestión de mantenimiento industrial. Plataforma multi-estudiante con activos individuales.">
+  <meta name="keywords" content="CMMS, mantenimiento, gestión de activos, órdenes de trabajo, mantenimiento preventivo, UNIPAZ, TOSEM">
+  <meta name="author" content="MaintPro — UNIPAZ TOSEM">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <!-- jsPDF for export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <!-- Firebase SDK (Firestore cloud database) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- ===== LOGIN SCREEN ===== -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo"><i class="fas fa-gear"></i></div>
+      <h1 class="login-title">MaintPro <span>CMMS</span></h1>
+      <p class="login-subtitle">Sistema de Gestión de Mantenimiento</p>
+      <p class="login-institution">UNIPAZ — TOSEM</p>
+
+      <form id="loginForm" autocomplete="off">
+        <div class="login-field">
+          <label for="loginIdentifier"><i class="fas fa-id-card"></i> Número de Cédula o Usuario</label>
+          <input type="text" id="loginIdentifier" placeholder="Ingrese su número de cédula" required autofocus>
+        </div>
+        <div class="login-field login-password-field" style="display:none">
+          <label for="loginPassword"><i class="fas fa-lock"></i> Contraseña</label>
+          <input type="password" id="loginPassword" placeholder="Contraseña de administrador">
+        </div>
+        <div id="loginError" class="login-error" style="display:none"></div>
+        <button type="submit" class="btn btn-primary login-btn"><i class="fas fa-right-to-bracket"></i> Iniciar Sesión</button>
+      </form>
+
+      <p class="login-hint">Ingrese su número de documento para acceder al sistema</p>
+    </div>
+    <div class="login-footer">Proyecto Académico — Ingeniería de Producción · UNIPAZ 2026</div>
+  </div>
+
+  <!-- ===== APP CONTAINER ===== -->
+  <div id="appContainer" style="display:none">
+
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo"><i class="fas fa-gear"></i></div>
+        <div>
+          <div class="sidebar-title">MaintPro</div>
+          <div class="sidebar-subtitle">CMMS v4.0</div>
+        </div>
+      </div>
+
+      <!-- User Info -->
+      <div class="user-section" id="userInfo"></div>
+
+      <!-- Admin Student Selector -->
+      <div class="admin-selector" id="adminStudentSelector" style="display:none">
+        <label>Estudiante</label>
+        <select id="adminStudentSelect" class="company-select"></select>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section-title">Principal</div>
+        <div class="nav-item active" data-view="dashboard">
+          <i class="fas fa-chart-line"></i>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" data-view="assets">
+          <i class="fas fa-cogs"></i>
+          <span>Activos / Equipos</span>
+        </div>
+        <div class="nav-item" data-view="workorders">
+          <i class="fas fa-clipboard-list"></i>
+          <span>Órdenes de Trabajo</span>
+          <span class="nav-badge" id="badgePendingWOs" style="display:none">0</span>
+        </div>
+
+        <div class="nav-section-title">Planificación</div>
+        <div class="nav-item" data-view="preventive">
+          <i class="fas fa-calendar-check"></i>
+          <span>Mtto. Preventivo</span>
+          <span class="nav-badge" id="badgeOverduePMs" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-view="calendar">
+          <i class="fas fa-calendar-days"></i>
+          <span>Calendario</span>
+        </div>
+        <div class="nav-item" data-view="inventory">
+          <i class="fas fa-boxes-stacked"></i>
+          <span>Inventario</span>
+          <span class="nav-badge" id="badgeLowStock" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-view="personnel">
+          <i class="fas fa-users-gear"></i>
+          <span>Personal Técnico</span>
+        </div>
+        <div class="nav-item" data-view="purchases">
+          <i class="fas fa-cart-shopping"></i>
+          <span>Compras</span>
+          <span class="nav-badge" id="badgePendingPurchases" style="display:none">0</span>
+        </div>
+
+        <div class="nav-section-title">Análisis</div>
+        <div class="nav-item" data-view="reports">
+          <i class="fas fa-chart-pie"></i>
+          <span>Reportes y KPIs</span>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="btn btn-secondary btn-sm" id="btnLogout" style="width:100%"><i class="fas fa-right-from-bracket"></i> Cerrar Sesión</button>
+        <!-- Technician mode toggle (students only) -->
+        <button class="btn btn-tech-toggle" id="btnTechMode" style="display:none;width:100%;margin-top:8px" title="Cambiar vista de rol">
+          <i class="fas fa-hard-hat"></i> Vista Técnico
+        </button>
+        <div style="margin-top:8px;font-size:0.65rem;color:var(--text-muted)">MaintPro CMMS v3.0 · UNIPAZ</div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div id="main-content">
+      <header id="topbar">
+        <div class="topbar-left">
+          <button class="btn btn-icon btn-menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">
+            <i class="fas fa-bars"></i>
+          </button>
+          <div>
+            <h1 id="topbarTitle" class="topbar-title">Dashboard</h1>
+            <div id="topbarCompany" class="topbar-breadcrumb"></div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <span style="font-size:0.8rem;color:var(--text-muted)" id="currentDate"></span>
+          <!-- Notification Bell -->
+          <div class="notif-bell-wrapper">
+            <button class="btn btn-icon notif-bell" id="notifBell" title="Notificaciones">
+              <i class="fas fa-bell"></i>
+              <span class="notif-badge" id="notifBadge" style="display:none">0</span>
+            </button>
+            <div class="notif-panel" id="notifPanel"></div>
+          </div>
+        </div>
+      </header>
+
+      <div id="content">
+        <section id="view-dashboard" class="view-section active"></section>
+        <section id="view-assets" class="view-section"></section>
+        <section id="view-workorders" class="view-section"></section>
+        <section id="view-preventive" class="view-section"></section>
+        <section id="view-calendar" class="view-section"></section>
+        <section id="view-inventory" class="view-section"></section>
+        <section id="view-personnel" class="view-section"></section>
+        <section id="view-reports" class="view-section"></section>
+        <section id="view-purchases" class="view-section"></section>
+        <section id="view-assetDetail" class="view-section"></section>
+        <!-- Technician mode view -->
+        <section id="view-technician" class="view-section"></section>
+        <!-- Admin master ranking view -->
+        <section id="view-adminRanking" class="view-section"></section>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">Modal</h2>
+        <button class="modal-close" id="modalClose"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modalCancel">Cancelar</button>
+        <button class="btn btn-primary" id="modalSave"><i class="fas fa-check"></i> Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts (order matters) -->
+  <script src="js/students.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Display current date
+    document.getElementById('currentDate').textContent = new Date().toLocaleDateString('es-CO', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    // Show/hide password field when "admin" is typed
+    document.getElementById('loginIdentifier').addEventListener('input', function() {
+      const pwField = document.querySelector('.login-password-field');
+      pwField.style.display = this.value.toLowerCase() === 'admin' ? 'block' : 'none';
+    });
+  </script>
+</body>
+</html>
