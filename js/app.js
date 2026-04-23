@@ -62,11 +62,13 @@ class App {
         const userInfo = document.getElementById('userInfo');
         const adminSelector = document.getElementById('adminStudentSelector');
         const btnTech = document.getElementById('btnTechMode');
+        const btnTechMobile = document.getElementById('btnTechModeMobile');
 
         if (auth.isAdmin()) {
             userInfo.innerHTML = `<div class="user-avatar admin"><i class="fas fa-user-shield"></i></div><div><div class="user-name">Administrador</div><div class="user-role">Modo Docente</div></div>`;
             adminSelector.style.display = 'block';
             btnTech.style.display = 'none';
+            if (btnTechMobile) btnTechMobile.style.display = 'none';
             const sel = document.getElementById('adminStudentSelect');
             sel.innerHTML = '<option value="">— Ranking General —</option>' +
                 STUDENTS.map(s => `<option value="${s.cedula}" ${auth.getCurrentCedula() === s.cedula ? 'selected' : ''}>${s.nombre}</option>`).join('');
@@ -88,11 +90,16 @@ class App {
             userInfo.innerHTML = `<div class="user-avatar student">${nombre.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><div class="user-name">${nombre}</div><div class="user-role">${sector.name}</div></div>`;
             adminSelector.style.display = 'none';
 
-            // Show technician toggle for students
+            // Show technician toggle for students (sidebar + mobile topbar)
             btnTech.style.display = 'block';
             btnTech.onclick = () => this.toggleTechnicianMode();
+            if (btnTechMobile) {
+                btnTechMobile.style.display = '';
+                btnTechMobile.onclick = () => this.toggleTechnicianMode();
+            }
         }
         document.getElementById('btnLogout').onclick = () => {
+            if (store && store.stopListening) store.stopListening();
             auth.logout(); store = null; this.technicianMode = false; this.showLogin();
         };
     }
@@ -100,17 +107,28 @@ class App {
     toggleTechnicianMode() {
         this.technicianMode = !this.technicianMode;
         const btn = document.getElementById('btnTechMode');
+        const btnMobile = document.getElementById('btnTechModeMobile');
         const nav = document.querySelector('.sidebar-nav');
         if (this.technicianMode) {
             btn.innerHTML = '<i class="fas fa-user-tie"></i> Vista Jefe';
             btn.classList.add('btn-tech-active');
+            if (btnMobile) {
+                btnMobile.innerHTML = '<i class="fas fa-user-tie"></i> <span class="tech-mobile-label">Jefe</span>';
+                btnMobile.classList.add('btn-tech-active');
+            }
             // Hide admin nav items
             nav.querySelectorAll('.nav-item').forEach(n => n.style.display = 'none');
             nav.querySelectorAll('.nav-section-title').forEach(n => n.style.display = 'none');
+            // Close sidebar on mobile after switching
+            document.getElementById('sidebar').classList.remove('open');
             this.navigate('technician');
         } else {
             btn.innerHTML = '<i class="fas fa-hard-hat"></i> Vista Técnico';
             btn.classList.remove('btn-tech-active');
+            if (btnMobile) {
+                btnMobile.innerHTML = '<i class="fas fa-hard-hat"></i> <span class="tech-mobile-label">Técnico</span>';
+                btnMobile.classList.remove('btn-tech-active');
+            }
             nav.querySelectorAll('.nav-item').forEach(n => n.style.display = '');
             nav.querySelectorAll('.nav-section-title').forEach(n => n.style.display = '');
             this.navigate('dashboard');
@@ -209,6 +227,37 @@ class App {
             store.markAlertSeen(b.dataset.dismiss);
             this.checkInjectedAlerts();
         }));
+    }
+
+    /** Called by DataStore when a remote change is detected via Firestore onSnapshot */
+    _onRemoteUpdate(newAlerts, changeContext = {}) {
+        console.info('[MaintPro] 📡 Remote update received, refreshing view...');
+        // Re-render the current view with fresh data
+        this.navigate(this.currentView);
+
+        // Show dramatic alert for new fault injections
+        if (newAlerts && newAlerts.length > 0) {
+            // Vibrate if supported (mobile)
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+            // Show a prominent toast for each new alert
+            newAlerts.forEach(alert => {
+                this.toast(`⚡ ALERTA: ${alert.assetName || 'Equipo'} ha presentado una falla crítica`, 'danger');
+            });
+
+            // Flash the screen briefly to draw attention
+            const flash = document.createElement('div');
+            flash.style.cssText = 'position:fixed;inset:0;background:rgba(255,23,68,0.15);z-index:99999;pointer-events:none;animation:flashFade 1.5s ease-out forwards';
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 1600);
+        } else if (changeContext.purchaseApproved) {
+            this.toast('✅ ¡Compra aprobada por gerencia! Revise la sección de Compras.', 'success');
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+        } else if (changeContext.purchaseRejected) {
+            this.toast('❌ Compra rechazada por gerencia. Revise la sección de Compras.', 'warning');
+        } else {
+            this.toast('🔄 Datos actualizados desde el servidor', 'info');
+        }
     }
 
     toast(msg, type = 'success') {
@@ -706,14 +755,38 @@ class App {
         this.showModal('✅ Aprobación de Compras — Gerencia', html, null);
 
         document.querySelectorAll('[data-approve-pur]').forEach(b => b.addEventListener('click', () => {
-            targetStore.updatePurchase(b.dataset.approvePur, { status: 'aprobada', approvedDate: store.today() });
-            document.getElementById(`appr_${b.dataset.approvePur}`).style.opacity = '0.4';
-            this.toast('Compra aprobada', 'success');
+            const purId = b.dataset.approvePur;
+            const pur = targetStore.getPurchases().find(p => p.id === purId);
+            targetStore.updatePurchase(purId, { status: 'aprobada', approvedDate: targetStore.today() });
+            // Notify student
+            targetStore.addNotification({
+                techId: null,
+                message: `✅ Compra aprobada por gerencia: ${pur?.itemName || 'Repuesto'} — ${this.fmtMoney(pur?.estimatedCost)}`,
+                type: 'purchase_approved',
+                relatedId: purId,
+                priority: 'alta'
+            });
+            targetStore.addLog({ action: 'purchase_approved', message: `Compra aprobada por docente: ${pur?.itemName || purId}` });
+            document.getElementById(`appr_${purId}`).style.opacity = '0.4';
+            b.disabled = true;
+            this.toast('Compra aprobada ✅', 'success');
         }));
         document.querySelectorAll('[data-reject-pur]').forEach(b => b.addEventListener('click', () => {
-            targetStore.updatePurchase(b.dataset.rejectPur, { status: 'cancelada' });
-            document.getElementById(`appr_${b.dataset.rejectPur}`).style.opacity = '0.4';
-            this.toast('Compra rechazada', 'danger');
+            const purId = b.dataset.rejectPur;
+            const pur = targetStore.getPurchases().find(p => p.id === purId);
+            targetStore.updatePurchase(purId, { status: 'cancelada' });
+            // Notify student
+            targetStore.addNotification({
+                techId: null,
+                message: `❌ Compra rechazada por gerencia: ${pur?.itemName || 'Repuesto'} — ${this.fmtMoney(pur?.estimatedCost)}`,
+                type: 'purchase_rejected',
+                relatedId: purId,
+                priority: 'media'
+            });
+            targetStore.addLog({ action: 'purchase_rejected', message: `Compra rechazada por docente: ${pur?.itemName || purId}` });
+            document.getElementById(`appr_${purId}`).style.opacity = '0.4';
+            b.disabled = true;
+            this.toast('Compra rechazada ❌', 'danger');
         }));
     }
 
