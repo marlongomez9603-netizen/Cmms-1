@@ -531,15 +531,41 @@ class App {
             if (!assetId || !desc) { this.toast('Equipo y descripción son obligatorios', 'danger'); return; }
             const priority = document.getElementById('fFaultSeverity').value;
             const techId = document.getElementById('fFaultTech').value;
-            store.addWorkOrder({
-                assetId, type: 'correctivo', priority, status: 'pendiente',
-                description: `🔧 REPORTE DE TÉCNICO: ${desc}`,
-                assignedTo: techId || null, createdDate: store.today(),
-                estimatedHours: '2', reportedByTech: true
+            const techName = techId ? store.getPersonnelById(techId)?.name : 'Técnico anónimo';
+
+            // Crear reporte de avería (NO crear OT — eso lo hace el Jefe de Mtto)
+            if (!store.data.faultReports) store.data.faultReports = [];
+            const reportId = store.genId();
+            const asset = store.getAsset(assetId);
+            store.data.faultReports.push({
+                id: reportId,
+                companyId: store.currentCompanyId,
+                assetId,
+                assetName: asset?.name || 'Equipo',
+                assetCode: asset?.code || '',
+                description: desc,
+                priority,
+                reportedBy: techName,
+                reportedDate: store.today(),
+                timestamp: new Date().toISOString(),
+                status: 'pendiente'
             });
+
+            // Cambiar estado del equipo según severidad
             store.updateAsset(assetId, { status: priority === 'critica' ? 'fuera_de_servicio' : 'en_mantenimiento' });
-            store.addLog({ action: 'wo_created', message: `Avería reportada por técnico: ${store.getAsset(assetId)?.name}` });
-            this.toast('¡Avería reportada! El jefe de mantenimiento recibirá la notificación.', 'warning');
+
+            // Notificación al Jefe de Mtto
+            store.addNotification({
+                techId: techId || null,
+                message: `🚨 ${techName} reportó avería en ${asset?.name}: ${desc.substring(0, 60)}...`,
+                type: 'fault_report',
+                relatedId: reportId,
+                priority
+            });
+            store.addLog({ action: 'fault_reported', message: `Avería reportada por ${techName}: ${asset?.name}` });
+            store.save();
+
+            this.toast('¡Avería reportada! El Jefe de Mantenimiento debe crear la OT correctiva.', 'warning');
             this.closeModal();
             this.renderTechTasks(this._selectedTech);
         });
@@ -800,10 +826,22 @@ class App {
         const overduePlans = plans.filter(p => p.nextExecution && p.nextExecution < today && p.status === 'activo');
         const upcomingPlans = plans.filter(p => p.nextExecution && p.nextExecution >= today && p.status === 'activo')
             .sort((a, b) => a.nextExecution.localeCompare(b.nextExecution)).slice(0, 5);
+        const pendingFaults = store.getPendingFaultReports ? store.getPendingFaultReports() : [];
         el.innerHTML = `
         ${k.overduePMs > 0 ? `<div class="alert-bar alert-danger"><i class="fas fa-exclamation-circle"></i><strong>${k.overduePMs} plan(es) preventivo(s) vencido(s)</strong> — Requieren atención inmediata</div>` : ''}
         ${k.lowStockCount > 0 ? `<div class="alert-bar alert-warning"><i class="fas fa-boxes-stacked"></i><strong>${k.lowStockCount} ítem(s) con stock bajo</strong></div>` : ''}
         ${k.pendingManagerPurchases > 0 ? `<div class="alert-bar alert-injected"><i class="fas fa-clock"></i><strong>${k.pendingManagerPurchases} compra(s) pendientes de aprobación del docente</strong> (> ${this.fmtMoney(1000000)})</div>` : ''}
+        ${pendingFaults.length > 0 ? `
+        <div class="alert-bar alert-danger" style="border-left:4px solid var(--danger);animation:pulse 2s infinite">
+            <i class="fas fa-triangle-exclamation"></i>
+            <div style="flex:1">
+                <strong>🚨 ${pendingFaults.length} REPORTE(S) DE AVERÍA PENDIENTE(S)</strong><br>
+                <span style="font-size:0.82rem;opacity:0.85">${pendingFaults.map(f => `${f.assetName} (${f.priority})`).join(' · ')}</span>
+            </div>
+            <button class="btn btn-danger btn-sm" id="btnGoToFaults" style="white-space:nowrap">
+                <i class="fas fa-clipboard-list"></i> Crear OT
+            </button>
+        </div>` : ''}
         <div class="kpi-grid">
             <div class="kpi-card kpi-primary"><div class="kpi-icon"><i class="fas fa-cogs"></i></div><div class="kpi-content"><div class="kpi-label">Total Activos</div><div class="kpi-value">${k.totalAssets}</div><div class="kpi-trend up"><i class="fas fa-circle-check"></i> ${k.activeAssets} operativos</div></div></div>
             <div class="kpi-card kpi-warning"><div class="kpi-icon"><i class="fas fa-clipboard-list"></i></div><div class="kpi-content"><div class="kpi-label">OT Pendientes</div><div class="kpi-value">${k.pendingWOs}</div><div class="kpi-trend"><i class="fas fa-spinner"></i> ${k.inProgressWOs} en progreso</div></div></div>
@@ -832,6 +870,9 @@ class App {
         </div>`;
         this.renderChart('chartWOType', 'doughnut', { labels: ['Correctivo', 'Preventivo', 'Predictivo', 'Mejora'], datasets: [{ data: [k.woByType.correctivo, k.woByType.preventivo, k.woByType.predictivo, k.woByType.mejora], backgroundColor: ['#ff5252', '#00e676', '#448aff', '#ffab40'], borderWidth: 0 }] });
         this.renderChart('chartWOPriority', 'bar', { labels: ['Crítica', 'Alta', 'Media', 'Baja'], datasets: [{ label: 'Cantidad', data: [k.woByPriority.critica, k.woByPriority.alta, k.woByPriority.media, k.woByPriority.baja], backgroundColor: ['#ff1744', '#ff5252', '#ffab40', '#448aff'], borderRadius: 6, borderSkipped: false }] }, { indexAxis: 'y' });
+        // Bind fault report button
+        const btnFaults = document.getElementById('btnGoToFaults');
+        if (btnFaults) btnFaults.addEventListener('click', () => this.navigate('workorders'));
     }
 
     renderChart(canvasId, type, data, extra = {}) {
@@ -916,7 +957,37 @@ class App {
     // ========== WORK ORDERS ==========
     renderWorkOrders() {
         const el = document.getElementById('view-workorders'); const wos = store.getWorkOrders();
+        const pendingFaults = store.getPendingFaultReports ? store.getPendingFaultReports() : [];
+
+        // Fault reports panel (if any pending)
+        const faultPanel = pendingFaults.length > 0 ? `
+        <div class="card" style="border:1px solid rgba(255,82,82,0.4);margin-bottom:20px;background:linear-gradient(135deg, rgba(255,82,82,0.08), var(--bg-surface))">
+            <div class="card-header">
+                <div class="card-title" style="color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> Reportes de Avería Pendientes — Requieren OT</div>
+                <span class="badge badge-danger">${pendingFaults.length}</span>
+            </div>
+            <div style="display:grid;gap:12px">
+                ${pendingFaults.map(f => `
+                <div class="fault-report-card" style="display:flex;align-items:center;gap:16px;padding:14px;background:var(--bg-elevated);border-radius:var(--radius-sm);border:1px solid var(--border)">
+                    <div style="flex-shrink:0;width:44px;height:44px;border-radius:var(--radius-sm);background:var(--danger-bg);color:var(--danger);display:flex;align-items:center;justify-content:center;font-size:1.2rem">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:600;font-size:0.92rem">${f.assetName} <span style="color:var(--text-muted);font-weight:400">(${f.assetCode})</span></div>
+                        <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px">${f.description}</div>
+                        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">
+                            Reportado por: ${f.reportedBy} · ${this.fmtDate(f.reportedDate)} · ${this.priorityBadge(f.priority)}
+                        </div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" data-create-wo-fault="${f.id}" style="white-space:nowrap">
+                        <i class="fas fa-plus"></i> Crear OT Correctiva
+                    </button>
+                </div>`).join('')}
+            </div>
+        </div>` : '';
+
         el.innerHTML = `
+        ${faultPanel}
         <div class="toolbar"><div class="toolbar-left"><div class="search-input"><i class="fas fa-search"></i><input type="text" id="woSearch" placeholder="Buscar órdenes..."></div>
             <select class="filter-select" id="woStatusFilter"><option value="">Todos</option><option value="pendiente">Pendiente</option><option value="en_progreso">En Progreso</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select>
             <select class="filter-select" id="woTypeFilter"><option value="">Todos los tipos</option><option value="correctivo">Correctivo</option><option value="preventivo">Preventivo</option><option value="predictivo">Predictivo</option><option value="mejora">Mejora</option></select></div>
@@ -926,6 +997,15 @@ class App {
         document.getElementById('btnAddWO').addEventListener('click', () => this.showWOForm());
         ['woSearch', 'woStatusFilter', 'woTypeFilter'].forEach(id => document.getElementById(id).addEventListener(id.includes('Search') ? 'input' : 'change', () => this.filterWOs()));
         this.bindWOActions();
+
+        // Bind "Crear OT" from fault reports
+        document.querySelectorAll('[data-create-wo-fault]').forEach(btn => btn.addEventListener('click', () => {
+            const reportId = btn.dataset.createWoFault;
+            const report = pendingFaults.find(f => f.id === reportId);
+            if (report) {
+                this.showWOForm(null, report);  // Pass fault report to pre-fill
+            }
+        }));
     }
 
     renderWORows(wos) {
@@ -1007,22 +1087,43 @@ class App {
         });
     }
 
-    showWOForm(editId) {
+    showWOForm(editId, faultReport) {
         const w = editId ? store.getWorkOrder(editId) : {};
+        // Pre-fill from fault report if provided
+        const fr = faultReport || {};
+        const prefillAsset = fr.assetId || w.assetId || '';
+        const prefillType = fr.assetId ? 'correctivo' : (w.type || '');
+        const prefillPriority = fr.priority || w.priority || '';
+        const prefillDesc = fr.assetId
+            ? `🔧 OT Correctiva por reporte de avería:\n${fr.description || ''}\nReportado por: ${fr.reportedBy || 'N/A'} — Fecha: ${fr.reportedDate || ''}`
+            : (w.description || '');
+
         const assets = store.getAssets(); const personnel = store.getPersonnel();
         const html = `
-        <div class="form-row"><div class="form-group"><label class="form-label">Equipo <span class="required">*</span></label><select class="form-control" id="fWOAsset"><option value="">Seleccionar...</option>${assets.map(a => `<option value="${a.id}" ${w.assetId === a.id ? 'selected' : ''}>${a.code} - ${a.name}</option>`).join('')}</select></div>
-            <div class="form-group"><label class="form-label">Tipo</label><select class="form-control" id="fWOType"><option value="correctivo" ${w.type === 'correctivo' ? 'selected' : ''}>Correctivo</option><option value="preventivo" ${w.type === 'preventivo' ? 'selected' : ''}>Preventivo</option><option value="predictivo" ${w.type === 'predictivo' ? 'selected' : ''}>Predictivo</option><option value="mejora" ${w.type === 'mejora' ? 'selected' : ''}>Mejora</option></select></div></div>
-        <div class="form-row"><div class="form-group"><label class="form-label">Prioridad</label><select class="form-control" id="fWOPriority"><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></div>
+        ${fr.assetId ? `<div class="fault-report-header" style="margin-bottom:16px"><i class="fas fa-triangle-exclamation"></i><div><strong>OT basada en Reporte de Avería</strong><p style="margin:0;font-size:0.82rem;color:var(--text-muted)">Equipo: ${fr.assetName} · Reportado por: ${fr.reportedBy}</p></div></div>` : ''}
+        <div class="form-row"><div class="form-group"><label class="form-label">Equipo <span class="required">*</span></label><select class="form-control" id="fWOAsset"><option value="">Seleccionar...</option>${assets.map(a => `<option value="${a.id}" ${prefillAsset === a.id ? 'selected' : ''}>${a.code} - ${a.name}</option>`).join('')}</select></div>
+            <div class="form-group"><label class="form-label">Tipo</label><select class="form-control" id="fWOType"><option value="correctivo" ${prefillType === 'correctivo' ? 'selected' : ''}>Correctivo</option><option value="preventivo" ${prefillType === 'preventivo' ? 'selected' : ''}>Preventivo</option><option value="predictivo" ${prefillType === 'predictivo' ? 'selected' : ''}>Predictivo</option><option value="mejora" ${prefillType === 'mejora' ? 'selected' : ''}>Mejora</option></select></div></div>
+        <div class="form-row"><div class="form-group"><label class="form-label">Prioridad</label><select class="form-control" id="fWOPriority"><option value="baja" ${prefillPriority === 'baja' ? 'selected' : ''}>Baja</option><option value="media" ${prefillPriority === 'media' ? 'selected' : ''}>Media</option><option value="alta" ${prefillPriority === 'alta' ? 'selected' : ''}>Alta</option><option value="critica" ${prefillPriority === 'critica' ? 'selected' : ''}>Crítica</option></select></div>
             <div class="form-group"><label class="form-label">Asignado a</label><select class="form-control" id="fWOAssigned"><option value="">Sin asignar</option>${personnel.map(p => `<option value="${p.id}" ${w.assignedTo === p.id ? 'selected' : ''}>${p.name} — ${this.fmtMoney(p.hourlyRate)}/h</option>`).join('')}</select></div></div>
-        <div class="form-group"><label class="form-label">Descripción <span class="required">*</span></label><textarea class="form-control" id="fWODesc" rows="3">${w.description || ''}</textarea></div>
-        <div class="form-row"><div class="form-group"><label class="form-label">Horas Estimadas</label><input class="form-control" type="number" id="fWOEstHours" value="${w.estimatedHours || ''}"></div>
+        <div class="form-group"><label class="form-label">Descripción <span class="required">*</span></label><textarea class="form-control" id="fWODesc" rows="3">${prefillDesc}</textarea></div>
+        <div class="form-row"><div class="form-group"><label class="form-label">Horas Estimadas</label><input class="form-control" type="number" id="fWOEstHours" value="${w.estimatedHours || (fr.assetId ? '4' : '')}"></div>
             <div class="form-group"><label class="form-label">Notas</label><input class="form-control" id="fWONotes" value="${w.notes || ''}"></div></div>`;
-        this.showModal(editId ? 'Editar OT' : 'Nueva Orden de Trabajo', html, () => {
+        this.showModal(editId ? 'Editar OT' : (fr.assetId ? '🔧 Crear OT Correctiva — Reporte de Avería' : 'Nueva Orden de Trabajo'), html, () => {
             const data = { assetId: document.getElementById('fWOAsset').value, type: document.getElementById('fWOType').value, priority: document.getElementById('fWOPriority').value, assignedTo: document.getElementById('fWOAssigned').value, description: document.getElementById('fWODesc').value, estimatedHours: document.getElementById('fWOEstHours').value, notes: document.getElementById('fWONotes').value };
             if (!data.assetId || !data.description) { this.toast('Equipo y Descripción son obligatorios', 'danger'); return; }
             if (editId) { store.updateWorkOrder(editId, data); this.toast('OT actualizada'); }
-            else { data.status = 'pendiente'; data.createdDate = store.today(); store.addWorkOrder(data); store.addLog({ action: 'wo_created', message: `OT creada: ${data.description.substring(0, 50)}` }); this.toast('OT creada'); }
+            else {
+                data.status = 'pendiente'; data.createdDate = store.today();
+                const newWO = store.addWorkOrder(data);
+                store.addLog({ action: 'wo_created', message: `OT creada: ${data.description.substring(0, 50)}` });
+                // If created from a fault report, mark it as resolved
+                if (fr.id && store.resolveFaultReport) {
+                    store.resolveFaultReport(fr.id, newWO.id);
+                    this.toast('✅ OT creada y reporte de avería gestionado', 'success');
+                } else {
+                    this.toast('OT creada');
+                }
+            }
             this.closeModal(); this.renderWorkOrders();
         });
     }

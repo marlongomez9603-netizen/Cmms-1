@@ -682,35 +682,78 @@ class DataStore {
     injectFailure(assetId, description, priority) {
         const asset = this.getAsset(assetId);
         if (!asset) return null;
-        const wo = this.addWorkOrder({
-            assetId,
-            type: 'correctivo',
-            priority: priority || 'critica',
-            status: 'pendiente',
-            description: description || `⚠️ AVERÍA SIMULADA: ${asset.name} — Falla crítica detectada`,
-            createdDate: this.today(),
-            estimatedHours: '4',
-            injected: true,
-            companyId: this.currentCompanyId
-        });
+
+        // 1. Cambiar estado del equipo a fuera_de_servicio (NO crear OT)
         this.updateAsset(assetId, { status: 'fuera_de_servicio' });
+
+        // 2. Crear reporte de avería (el estudiante debe crear la OT)
+        if (!this.data.faultReports) this.data.faultReports = [];
+        const reportId = this.genId();
+        const report = {
+            id: reportId,
+            companyId: this.currentCompanyId,
+            assetId,
+            assetName: asset.name,
+            assetCode: asset.code,
+            description: description || `Falla crítica detectada en ${asset.name}`,
+            priority: priority || 'critica',
+            reportedBy: 'Docente (Simulación)',
+            reportedDate: this.today(),
+            timestamp: new Date().toISOString(),
+            status: 'pendiente'  // pendiente = esperando que el Jefe cree la OT
+        };
+        this.data.faultReports.push(report);
+
+        // 3. Log de actividad
         this.addLog({
             action: 'fault_injected',
-            message: `⚠️ Falla inyectada por docente: ${asset.name}`
+            message: `⚠️ Falla reportada por docente: ${asset.name} — Requiere gestión de OT`
         });
-        // Set alert flag for student
+
+        // 4. Alerta visual para el estudiante
         if (!this.data.injectedAlerts) this.data.injectedAlerts = [];
         this.data.injectedAlerts.push({
             id: this.genId(),
             companyId: this.currentCompanyId,
             assetId, assetName: asset.name,
-            woId: wo.id,
-            message: `⚠️ El equipo <strong>${asset.name}</strong> ha presentado una falla crítica. Gestione la OT inmediatamente.`,
+            reportId,
+            message: `⚠️ El equipo <strong>${asset.name}</strong> ha presentado una falla ${priority || 'crítica'}. <strong>Debe crear una OT correctiva.</strong>`,
             timestamp: new Date().toISOString(),
             seen: false
         });
+
+        // 5. Notificación persistente
+        this.addNotification({
+            techId: null,
+            message: `🔧 AVERÍA: ${asset.name} (${asset.code}) está fuera de servicio. Cree una OT correctiva desde Órdenes de Trabajo.`,
+            type: 'fault_injected',
+            relatedId: reportId,
+            priority: priority || 'critica'
+        });
+
         this.save();
-        return wo;
+        return report;
+    }
+
+    // ---------- Fault Reports ----------
+    getFaultReports() {
+        return (this.data.faultReports || [])
+            .filter(r => r.companyId === this.currentCompanyId);
+    }
+
+    getPendingFaultReports() {
+        return this.getFaultReports().filter(r => r.status === 'pendiente');
+    }
+
+    resolveFaultReport(reportId, woId) {
+        const report = (this.data.faultReports || []).find(r => r.id === reportId);
+        if (report) {
+            report.status = 'gestionado';
+            report.woId = woId;
+            report.resolvedDate = this.today();
+            this.save();
+        }
+        return report;
     }
 
     getUnseenAlerts() {
