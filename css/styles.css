@@ -365,6 +365,16 @@ a {
   }
 }
 
+@keyframes flashFade {
+  0% { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ---------- Cards ---------- */
 .card {
   background: var(--bg-surface);
@@ -2597,6 +2607,32 @@ input[type="number"]::-webkit-outer-spin-button {
   background: rgba(97,218,251,0.1);
   color: var(--primary);
   border-color: rgba(97,218,251,0.3);
+}
+
+/* Mobile technician toggle (topbar) — hidden on desktop, shown on mobile */
+.btn-tech-mobile {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .btn-tech-mobile {
+    display: inline-flex !important;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    gap: 6px;
+    white-space: nowrap;
+    animation: fadeInUp 0.3s ease;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-tech-mobile {
+    padding: 6px 10px;
+    font-size: 0.72rem;
+  }
+  .btn-tech-mobile .tech-mobile-label {
+    display: none;
+  }
 }
 
 /* Fault report modal */

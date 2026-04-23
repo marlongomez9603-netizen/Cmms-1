@@ -29,13 +29,15 @@ try {
 }
 
 class DataStore {
-    constructor(cedula) {
+    constructor(cedula, options = {}) {
         this.cedula = cedula;
         this.STORAGE_KEY = `maintpro_${cedula}`;
         this.db = _fbDb;  // referencia global a Firestore
         this._cloudRef = this.db
             ? this.db.collection('students').doc(String(cedula))
             : null;
+        this._lastSaveTimestamp = 0;  // prevent circular snapshot triggers
+        this._unsubscribeSnapshot = null;  // Firestore listener handle
 
         // 1. Intentar cargar de localStorage (rápido, sincrónico)
         this.data = this.load();
@@ -47,8 +49,13 @@ class DataStore {
         } else {
             // Datos locales ok → migrar y sincronizar en background
             this._migrate();
-            this.currentCompanyId = this.data.companies[0].id;
+            this.currentCompanyId = this.data ? this.data.companies[0].id : null;
             this._syncToCloud();  // actualizar Firestore en background
+        }
+
+        // 3. Start real-time listener ONLY for the main store (not temp instances)
+        if (options.listen) {
+            this._startRealtimeListener();
         }
     }
 
@@ -136,9 +143,83 @@ class DataStore {
     /** Sincroniza el estado actual a Firestore (background, no bloquea) */
     _syncToCloud() {
         if (!this._cloudRef || !this.data) return;
-        // Usamos set() con merge para no sobrescribir campos que pueda tener el docente
+        this._lastSaveTimestamp = Date.now();
         this._cloudRef.set(this.data)
             .catch(e => console.warn('[MaintPro] Error sync Firestore:', e.message));
+    }
+
+    /** Real-time listener: detects remote changes (teacher fault injection, purchase approvals) */
+    _startRealtimeListener() {
+        if (!this._cloudRef) return;
+        this._unsubscribeSnapshot = this._cloudRef.onSnapshot(snap => {
+            // Ignore snapshots triggered by our own save (within 3 seconds)
+            if (Date.now() - this._lastSaveTimestamp < 3000) return;
+            if (!snap.exists) return;
+            const remoteData = snap.data();
+            if (!remoteData || !remoteData.companies) return;
+
+            // Check if remote has new injected alerts we haven't seen
+            const localAlerts = (this.data?.injectedAlerts || []).map(a => a.id);
+            const remoteAlerts = (remoteData.injectedAlerts || []);
+            const newAlerts = remoteAlerts.filter(a => !localAlerts.includes(a.id));
+
+            // Check if remote has more work orders (fault injected)
+            const localWOCount = (this.data?.workOrders || []).length;
+            const remoteWOCount = (remoteData.workOrders || []).length;
+
+            // Check if asset statuses changed (fuera_de_servicio)
+            const localDownAssets = (this.data?.assets || []).filter(a => a.status === 'fuera_de_servicio').length;
+            const remoteDownAssets = (remoteData.assets || []).filter(a => a.status === 'fuera_de_servicio').length;
+
+            // Check for purchase status changes (approved/rejected)
+            const localApproved = (this.data?.purchases || []).filter(p => p.status === 'aprobada').length;
+            const remoteApproved = (remoteData.purchases || []).filter(p => p.status === 'aprobada').length;
+            const localCancelled = (this.data?.purchases || []).filter(p => p.status === 'cancelada').length;
+            const remoteCancelled = (remoteData.purchases || []).filter(p => p.status === 'cancelada').length;
+
+            // Check for new notifications
+            const localNotifCount = (this.data?.notifications || []).length;
+            const remoteNotifCount = (remoteData.notifications || []).length;
+
+            const hasChanges = newAlerts.length > 0 ||
+                               remoteWOCount !== localWOCount ||
+                               remoteDownAssets !== localDownAssets ||
+                               remoteApproved !== localApproved ||
+                               remoteCancelled !== localCancelled ||
+                               remoteNotifCount !== localNotifCount;
+
+            if (hasChanges) {
+                console.info('[MaintPro] 🔄 Cambio remoto detectado — actualizando datos...');
+                this.data = remoteData;
+                this._migrate();
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.data));
+                this.currentCompanyId = this.data.companies[0].id;
+
+                // Build change context for the app
+                const changeContext = {
+                    newAlerts,
+                    purchaseApproved: remoteApproved > localApproved,
+                    purchaseRejected: remoteCancelled > localCancelled,
+                    newWorkOrders: remoteWOCount > localWOCount,
+                    assetsDown: remoteDownAssets > localDownAssets
+                };
+
+                // Notify the app to refresh the current view
+                if (window.app && typeof window.app._onRemoteUpdate === 'function') {
+                    window.app._onRemoteUpdate(newAlerts, changeContext);
+                }
+            }
+        }, err => {
+            console.warn('[MaintPro] Snapshot listener error:', err.message);
+        });
+    }
+
+    /** Stop listening (called on logout) */
+    stopListening() {
+        if (this._unsubscribeSnapshot) {
+            this._unsubscribeSnapshot();
+            this._unsubscribeSnapshot = null;
+        }
     }
 
     /** Fuerza recuperar los datos desde Firestore (útil si el docente hizo cambios remotos) */
@@ -668,5 +749,6 @@ class DataStore {
 let store = null;
 
 function initStore(cedula) {
-    store = new DataStore(cedula);
+    if (store && store.stopListening) store.stopListening();
+    store = new DataStore(cedula, { listen: true });
 }
