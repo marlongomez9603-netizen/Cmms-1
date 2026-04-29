@@ -2577,17 +2577,20 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .tech-empty-tasks {
   text-align: center;
-  padding: 60px 20px;
+  padding: 60px 20px 100px;
   color: var(--text-muted);
 }
 
 .tech-report-bar {
-  position: sticky;
+  position: fixed;
   bottom: 0;
-  padding: 16px 0;
-  background: linear-gradient(to top, var(--bg-page) 70%, transparent);
+  left: 0;
+  right: 0;
+  padding: 12px 20px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, var(--bg-page) 80%, transparent);
   text-align: center;
-  margin-top: 24px;
+  z-index: 50;
 }
 
 .btn-lg { padding: 14px 32px !important; font-size: 1rem !important; }
