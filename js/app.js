@@ -62,11 +62,13 @@ class App {
         const userInfo = document.getElementById('userInfo');
         const adminSelector = document.getElementById('adminStudentSelector');
         const btnTech = document.getElementById('btnTechMode');
+        const btnTechMobile = document.getElementById('btnTechModeMobile');
 
         if (auth.isAdmin()) {
             userInfo.innerHTML = `<div class="user-avatar admin"><i class="fas fa-user-shield"></i></div><div><div class="user-name">Administrador</div><div class="user-role">Modo Docente</div></div>`;
             adminSelector.style.display = 'block';
             btnTech.style.display = 'none';
+            if (btnTechMobile) btnTechMobile.style.display = 'none';
             const sel = document.getElementById('adminStudentSelect');
             sel.innerHTML = '<option value="">— Ranking General —</option>' +
                 STUDENTS.map(s => `<option value="${s.cedula}" ${auth.getCurrentCedula() === s.cedula ? 'selected' : ''}>${s.nombre}</option>`).join('');
@@ -88,11 +90,16 @@ class App {
             userInfo.innerHTML = `<div class="user-avatar student">${nombre.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><div class="user-name">${nombre}</div><div class="user-role">${sector.name}</div></div>`;
             adminSelector.style.display = 'none';
 
-            // Show technician toggle for students
+            // Show technician toggle for students (sidebar + mobile topbar)
             btnTech.style.display = 'block';
             btnTech.onclick = () => this.toggleTechnicianMode();
+            if (btnTechMobile) {
+                btnTechMobile.style.display = '';
+                btnTechMobile.onclick = () => this.toggleTechnicianMode();
+            }
         }
         document.getElementById('btnLogout').onclick = () => {
+            if (store && store.stopListening) store.stopListening();
             auth.logout(); store = null; this.technicianMode = false; this.showLogin();
         };
     }
@@ -100,17 +107,28 @@ class App {
     toggleTechnicianMode() {
         this.technicianMode = !this.technicianMode;
         const btn = document.getElementById('btnTechMode');
+        const btnMobile = document.getElementById('btnTechModeMobile');
         const nav = document.querySelector('.sidebar-nav');
         if (this.technicianMode) {
             btn.innerHTML = '<i class="fas fa-user-tie"></i> Vista Jefe';
             btn.classList.add('btn-tech-active');
+            if (btnMobile) {
+                btnMobile.innerHTML = '<i class="fas fa-user-tie"></i> <span class="tech-mobile-label">Jefe</span>';
+                btnMobile.classList.add('btn-tech-active');
+            }
             // Hide admin nav items
             nav.querySelectorAll('.nav-item').forEach(n => n.style.display = 'none');
             nav.querySelectorAll('.nav-section-title').forEach(n => n.style.display = 'none');
+            // Close sidebar on mobile after switching
+            document.getElementById('sidebar').classList.remove('open');
             this.navigate('technician');
         } else {
             btn.innerHTML = '<i class="fas fa-hard-hat"></i> Vista Técnico';
             btn.classList.remove('btn-tech-active');
+            if (btnMobile) {
+                btnMobile.innerHTML = '<i class="fas fa-hard-hat"></i> <span class="tech-mobile-label">Técnico</span>';
+                btnMobile.classList.remove('btn-tech-active');
+            }
             nav.querySelectorAll('.nav-item').forEach(n => n.style.display = '');
             nav.querySelectorAll('.nav-section-title').forEach(n => n.style.display = '');
             this.navigate('dashboard');
@@ -143,7 +161,8 @@ class App {
             inventory: 'Inventario de Repuestos', personnel: 'Personal Técnico',
             reports: 'Reportes y KPIs', calendar: 'Calendario de Mantenimiento',
             purchases: 'Compras y Proveedores', assetDetail: 'Historial del Equipo',
-            technician: '🪖 Vista Operativa — Técnico', adminRanking: '🎓 Centro de Control Docente'
+            technician: '🪖 Vista Operativa — Técnico', adminRanking: '🎓 Centro de Control Docente',
+            requests: 'Solicitudes de Trabajo'
         };
         const topTitle = document.getElementById('topbarTitle');
         if (topTitle) topTitle.textContent = titles[view] || '';
@@ -161,7 +180,8 @@ class App {
             purchases: () => this.renderPurchases(),
             assetDetail: () => this.renderAssetDetail(),
             technician: () => this.renderTechnicianView(),
-            adminRanking: () => this.renderAdminRanking()
+            adminRanking: () => this.renderAdminRanking(),
+            requests: () => this.renderRequests()
         };
         if (renders[view]) renders[view]();
         if (store) this.updateBadges();
@@ -175,7 +195,8 @@ class App {
             badgePendingWOs: k.pendingWOs,
             badgeOverduePMs: k.overduePMs,
             badgeLowStock: k.lowStockCount,
-            badgePendingPurchases: k.pendingPurchases + k.pendingManagerPurchases
+            badgePendingPurchases: k.pendingPurchases + k.pendingManagerPurchases,
+            badgePendingRequests: k.pendingRequests
         };
         Object.entries(badges).forEach(([id, val]) => {
             const b = document.getElementById(id);
@@ -209,6 +230,37 @@ class App {
             store.markAlertSeen(b.dataset.dismiss);
             this.checkInjectedAlerts();
         }));
+    }
+
+    /** Called by DataStore when a remote change is detected via Firestore onSnapshot */
+    _onRemoteUpdate(newAlerts, changeContext = {}) {
+        console.info('[MaintPro] 📡 Remote update received, refreshing view...');
+        // Re-render the current view with fresh data
+        this.navigate(this.currentView);
+
+        // Show dramatic alert for new fault injections
+        if (newAlerts && newAlerts.length > 0) {
+            // Vibrate if supported (mobile)
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+            // Show a prominent toast for each new alert
+            newAlerts.forEach(alert => {
+                this.toast(`⚡ ALERTA: ${alert.assetName || 'Equipo'} ha presentado una falla crítica`, 'danger');
+            });
+
+            // Flash the screen briefly to draw attention
+            const flash = document.createElement('div');
+            flash.style.cssText = 'position:fixed;inset:0;background:rgba(255,23,68,0.15);z-index:99999;pointer-events:none;animation:flashFade 1.5s ease-out forwards';
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 1600);
+        } else if (changeContext.purchaseApproved) {
+            this.toast('✅ ¡Compra aprobada por gerencia! Revise la sección de Compras.', 'success');
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+        } else if (changeContext.purchaseRejected) {
+            this.toast('❌ Compra rechazada por gerencia. Revise la sección de Compras.', 'warning');
+        } else {
+            this.toast('🔄 Datos actualizados desde el servidor', 'info');
+        }
     }
 
     toast(msg, type = 'success') {
@@ -482,15 +534,41 @@ class App {
             if (!assetId || !desc) { this.toast('Equipo y descripción son obligatorios', 'danger'); return; }
             const priority = document.getElementById('fFaultSeverity').value;
             const techId = document.getElementById('fFaultTech').value;
-            store.addWorkOrder({
-                assetId, type: 'correctivo', priority, status: 'pendiente',
-                description: `🔧 REPORTE DE TÉCNICO: ${desc}`,
-                assignedTo: techId || null, createdDate: store.today(),
-                estimatedHours: '2', reportedByTech: true
+            const techName = techId ? store.getPersonnelById(techId)?.name : 'Técnico anónimo';
+
+            // Crear reporte de avería (NO crear OT — eso lo hace el Jefe de Mtto)
+            if (!store.data.faultReports) store.data.faultReports = [];
+            const reportId = store.genId();
+            const asset = store.getAsset(assetId);
+            store.data.faultReports.push({
+                id: reportId,
+                companyId: store.currentCompanyId,
+                assetId,
+                assetName: asset?.name || 'Equipo',
+                assetCode: asset?.code || '',
+                description: desc,
+                priority,
+                reportedBy: techName,
+                reportedDate: store.today(),
+                timestamp: new Date().toISOString(),
+                status: 'pendiente'
             });
+
+            // Cambiar estado del equipo según severidad
             store.updateAsset(assetId, { status: priority === 'critica' ? 'fuera_de_servicio' : 'en_mantenimiento' });
-            store.addLog({ action: 'wo_created', message: `Avería reportada por técnico: ${store.getAsset(assetId)?.name}` });
-            this.toast('¡Avería reportada! El jefe de mantenimiento recibirá la notificación.', 'warning');
+
+            // Notificación al Jefe de Mtto
+            store.addNotification({
+                techId: techId || null,
+                message: `🚨 ${techName} reportó avería en ${asset?.name}: ${desc.substring(0, 60)}...`,
+                type: 'fault_report',
+                relatedId: reportId,
+                priority
+            });
+            store.addLog({ action: 'fault_reported', message: `Avería reportada por ${techName}: ${asset?.name}` });
+            store.save();
+
+            this.toast('¡Avería reportada! El Jefe de Mantenimiento debe crear la OT correctiva.', 'warning');
             this.closeModal();
             this.renderTechTasks(this._selectedTech);
         });
@@ -706,14 +784,38 @@ class App {
         this.showModal('✅ Aprobación de Compras — Gerencia', html, null);
 
         document.querySelectorAll('[data-approve-pur]').forEach(b => b.addEventListener('click', () => {
-            targetStore.updatePurchase(b.dataset.approvePur, { status: 'aprobada', approvedDate: store.today() });
-            document.getElementById(`appr_${b.dataset.approvePur}`).style.opacity = '0.4';
-            this.toast('Compra aprobada', 'success');
+            const purId = b.dataset.approvePur;
+            const pur = targetStore.getPurchases().find(p => p.id === purId);
+            targetStore.updatePurchase(purId, { status: 'aprobada', approvedDate: targetStore.today() });
+            // Notify student
+            targetStore.addNotification({
+                techId: null,
+                message: `✅ Compra aprobada por gerencia: ${pur?.itemName || 'Repuesto'} — ${this.fmtMoney(pur?.estimatedCost)}`,
+                type: 'purchase_approved',
+                relatedId: purId,
+                priority: 'alta'
+            });
+            targetStore.addLog({ action: 'purchase_approved', message: `Compra aprobada por docente: ${pur?.itemName || purId}` });
+            document.getElementById(`appr_${purId}`).style.opacity = '0.4';
+            b.disabled = true;
+            this.toast('Compra aprobada ✅', 'success');
         }));
         document.querySelectorAll('[data-reject-pur]').forEach(b => b.addEventListener('click', () => {
-            targetStore.updatePurchase(b.dataset.rejectPur, { status: 'cancelada' });
-            document.getElementById(`appr_${b.dataset.rejectPur}`).style.opacity = '0.4';
-            this.toast('Compra rechazada', 'danger');
+            const purId = b.dataset.rejectPur;
+            const pur = targetStore.getPurchases().find(p => p.id === purId);
+            targetStore.updatePurchase(purId, { status: 'cancelada' });
+            // Notify student
+            targetStore.addNotification({
+                techId: null,
+                message: `❌ Compra rechazada por gerencia: ${pur?.itemName || 'Repuesto'} — ${this.fmtMoney(pur?.estimatedCost)}`,
+                type: 'purchase_rejected',
+                relatedId: purId,
+                priority: 'media'
+            });
+            targetStore.addLog({ action: 'purchase_rejected', message: `Compra rechazada por docente: ${pur?.itemName || purId}` });
+            document.getElementById(`appr_${purId}`).style.opacity = '0.4';
+            b.disabled = true;
+            this.toast('Compra rechazada ❌', 'danger');
         }));
     }
 
@@ -727,10 +829,22 @@ class App {
         const overduePlans = plans.filter(p => p.nextExecution && p.nextExecution < today && p.status === 'activo');
         const upcomingPlans = plans.filter(p => p.nextExecution && p.nextExecution >= today && p.status === 'activo')
             .sort((a, b) => a.nextExecution.localeCompare(b.nextExecution)).slice(0, 5);
+        const pendingFaults = store.getPendingFaultReports ? store.getPendingFaultReports() : [];
         el.innerHTML = `
         ${k.overduePMs > 0 ? `<div class="alert-bar alert-danger"><i class="fas fa-exclamation-circle"></i><strong>${k.overduePMs} plan(es) preventivo(s) vencido(s)</strong> — Requieren atención inmediata</div>` : ''}
         ${k.lowStockCount > 0 ? `<div class="alert-bar alert-warning"><i class="fas fa-boxes-stacked"></i><strong>${k.lowStockCount} ítem(s) con stock bajo</strong></div>` : ''}
         ${k.pendingManagerPurchases > 0 ? `<div class="alert-bar alert-injected"><i class="fas fa-clock"></i><strong>${k.pendingManagerPurchases} compra(s) pendientes de aprobación del docente</strong> (> ${this.fmtMoney(1000000)})</div>` : ''}
+        ${pendingFaults.length > 0 ? `
+        <div class="alert-bar alert-danger" style="border-left:4px solid var(--danger);animation:pulse 2s infinite">
+            <i class="fas fa-triangle-exclamation"></i>
+            <div style="flex:1">
+                <strong>🚨 ${pendingFaults.length} REPORTE(S) DE AVERÍA PENDIENTE(S)</strong><br>
+                <span style="font-size:0.82rem;opacity:0.85">${pendingFaults.map(f => `${f.assetName} (${f.priority})`).join(' · ')}</span>
+            </div>
+            <button class="btn btn-danger btn-sm" id="btnGoToFaults" style="white-space:nowrap">
+                <i class="fas fa-clipboard-list"></i> Crear OT
+            </button>
+        </div>` : ''}
         <div class="kpi-grid">
             <div class="kpi-card kpi-primary"><div class="kpi-icon"><i class="fas fa-cogs"></i></div><div class="kpi-content"><div class="kpi-label">Total Activos</div><div class="kpi-value">${k.totalAssets}</div><div class="kpi-trend up"><i class="fas fa-circle-check"></i> ${k.activeAssets} operativos</div></div></div>
             <div class="kpi-card kpi-warning"><div class="kpi-icon"><i class="fas fa-clipboard-list"></i></div><div class="kpi-content"><div class="kpi-label">OT Pendientes</div><div class="kpi-value">${k.pendingWOs}</div><div class="kpi-trend"><i class="fas fa-spinner"></i> ${k.inProgressWOs} en progreso</div></div></div>
@@ -759,6 +873,9 @@ class App {
         </div>`;
         this.renderChart('chartWOType', 'doughnut', { labels: ['Correctivo', 'Preventivo', 'Predictivo', 'Mejora'], datasets: [{ data: [k.woByType.correctivo, k.woByType.preventivo, k.woByType.predictivo, k.woByType.mejora], backgroundColor: ['#ff5252', '#00e676', '#448aff', '#ffab40'], borderWidth: 0 }] });
         this.renderChart('chartWOPriority', 'bar', { labels: ['Crítica', 'Alta', 'Media', 'Baja'], datasets: [{ label: 'Cantidad', data: [k.woByPriority.critica, k.woByPriority.alta, k.woByPriority.media, k.woByPriority.baja], backgroundColor: ['#ff1744', '#ff5252', '#ffab40', '#448aff'], borderRadius: 6, borderSkipped: false }] }, { indexAxis: 'y' });
+        // Bind fault report button
+        const btnFaults = document.getElementById('btnGoToFaults');
+        if (btnFaults) btnFaults.addEventListener('click', () => this.navigate('workorders'));
     }
 
     renderChart(canvasId, type, data, extra = {}) {
@@ -843,7 +960,37 @@ class App {
     // ========== WORK ORDERS ==========
     renderWorkOrders() {
         const el = document.getElementById('view-workorders'); const wos = store.getWorkOrders();
+        const pendingFaults = store.getPendingFaultReports ? store.getPendingFaultReports() : [];
+
+        // Fault reports panel (if any pending)
+        const faultPanel = pendingFaults.length > 0 ? `
+        <div class="card" style="border:1px solid rgba(255,82,82,0.4);margin-bottom:20px;background:linear-gradient(135deg, rgba(255,82,82,0.08), var(--bg-surface))">
+            <div class="card-header">
+                <div class="card-title" style="color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> Reportes de Avería Pendientes — Requieren OT</div>
+                <span class="badge badge-danger">${pendingFaults.length}</span>
+            </div>
+            <div style="display:grid;gap:12px">
+                ${pendingFaults.map(f => `
+                <div class="fault-report-card" style="display:flex;align-items:center;gap:16px;padding:14px;background:var(--bg-elevated);border-radius:var(--radius-sm);border:1px solid var(--border)">
+                    <div style="flex-shrink:0;width:44px;height:44px;border-radius:var(--radius-sm);background:var(--danger-bg);color:var(--danger);display:flex;align-items:center;justify-content:center;font-size:1.2rem">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:600;font-size:0.92rem">${f.assetName} <span style="color:var(--text-muted);font-weight:400">(${f.assetCode})</span></div>
+                        <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px">${f.description}</div>
+                        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">
+                            Reportado por: ${f.reportedBy} · ${this.fmtDate(f.reportedDate)} · ${this.priorityBadge(f.priority)}
+                        </div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" data-create-wo-fault="${f.id}" style="white-space:nowrap">
+                        <i class="fas fa-plus"></i> Crear OT Correctiva
+                    </button>
+                </div>`).join('')}
+            </div>
+        </div>` : '';
+
         el.innerHTML = `
+        ${faultPanel}
         <div class="toolbar"><div class="toolbar-left"><div class="search-input"><i class="fas fa-search"></i><input type="text" id="woSearch" placeholder="Buscar órdenes..."></div>
             <select class="filter-select" id="woStatusFilter"><option value="">Todos</option><option value="pendiente">Pendiente</option><option value="en_progreso">En Progreso</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select>
             <select class="filter-select" id="woTypeFilter"><option value="">Todos los tipos</option><option value="correctivo">Correctivo</option><option value="preventivo">Preventivo</option><option value="predictivo">Predictivo</option><option value="mejora">Mejora</option></select></div>
@@ -853,6 +1000,15 @@ class App {
         document.getElementById('btnAddWO').addEventListener('click', () => this.showWOForm());
         ['woSearch', 'woStatusFilter', 'woTypeFilter'].forEach(id => document.getElementById(id).addEventListener(id.includes('Search') ? 'input' : 'change', () => this.filterWOs()));
         this.bindWOActions();
+
+        // Bind "Crear OT" from fault reports
+        document.querySelectorAll('[data-create-wo-fault]').forEach(btn => btn.addEventListener('click', () => {
+            const reportId = btn.dataset.createWoFault;
+            const report = pendingFaults.find(f => f.id === reportId);
+            if (report) {
+                this.showWOForm(null, report);  // Pass fault report to pre-fill
+            }
+        }));
     }
 
     renderWORows(wos) {
@@ -907,6 +1063,44 @@ class App {
     showCompleteWOModal(woId, onDone) {
         const w = store.getWorkOrder(woId);
         const inventory = store.getInventory();
+        const isCorrective = w.type === 'correctivo';
+        const rcaHtml = isCorrective ? `
+        <div style="margin-top:16px;border-top:1px dashed var(--border);padding-top:16px">
+            <h4 style="margin-bottom:10px;color:var(--danger);font-size:0.9rem"><i class="fas fa-search-minus"></i> Causa Raíz (5 Porqués) · Obligatorio</h4>
+            <div class="form-group">
+                <label class="form-label">Modo de Falla <span class="required">*</span></label>
+                <select class="form-control" id="fRcaMode">
+                    <option value="desgaste">Desgaste natural / Fatiga</option>
+                    <option value="operacion">Error de operación / Sobrecarga</option>
+                    <option value="lubricacion">Falta de lubricación / Incorrecta</option>
+                    <option value="ajuste">Desajuste mecánico / Vibración</option>
+                    <option value="electrico">Falla eléctrica / Picos de tensión</option>
+                    <option value="otro">Otro / Desconocido</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">¿Por qué ocurrió la falla? (1) <span class="required">*</span></label>
+                <input class="form-control" id="fRcaWhy1" placeholder="Ej. El motor principal se detuvo" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">¿Por qué? (2) <span class="required">*</span></label>
+                <input class="form-control" id="fRcaWhy2" placeholder="Ej. Se activó la protección térmica por sobrecorriente" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">¿Por qué? (3) <span class="required">*</span></label>
+                <input class="form-control" id="fRcaWhy3" placeholder="Ej. El rotor estaba bloqueado mecánicamente" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">¿Por qué? (4) <span class="required">*</span></label>
+                <input class="form-control" id="fRcaWhy4" placeholder="Ej. Falla del rodamiento por pérdida de grasa" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">¿Por qué? (5) <span class="required">*</span></label>
+                <input class="form-control" id="fRcaWhy5" placeholder="Ej. El retén estaba roto y no se cambió en la última revisión" required>
+            </div>
+        </div>
+        ` : '';
+
         const html = `
         <div class="form-group"><label class="form-label">Horas Reales Trabajadas</label><input class="form-control" type="number" id="fCompleteHours" value="${w.actualHours || w.estimatedHours || '2'}" step="0.5"></div>
         <div class="form-group"><label class="form-label">Notas de Cierre</label><textarea class="form-control" id="fCompleteNotes" rows="2">${w.notes || ''}</textarea></div>
@@ -918,11 +1112,37 @@ class App {
                     <input type="number" class="form-control spare-qty" data-item-id="${i.id}" style="width:70px;padding:4px 8px;font-size:0.8rem" value="1" min="1" max="${i.quantity}">
                 </div>`).join('')}
             </div>
-        </div>`;
+        </div>
+        ${rcaHtml}`;
+
         this.showModal('Completar Orden de Trabajo', html, () => {
             const hours = document.getElementById('fCompleteHours').value;
             const notes = document.getElementById('fCompleteNotes').value;
-            store.updateWorkOrder(woId, { status: 'completada', completedDate: store.today(), actualHours: hours, notes });
+            
+            let rcaData = {};
+            if (isCorrective) {
+                const failureMode = document.getElementById('fRcaMode').value;
+                const why1 = document.getElementById('fRcaWhy1').value.trim();
+                const why2 = document.getElementById('fRcaWhy2').value.trim();
+                const why3 = document.getElementById('fRcaWhy3').value.trim();
+                const why4 = document.getElementById('fRcaWhy4').value.trim();
+                const why5 = document.getElementById('fRcaWhy5').value.trim();
+
+                if (!why1 || !why2 || !why3 || !why4 || !why5) {
+                    this.toast('Los 5 Porqués son obligatorios para OTs correctivas', 'danger');
+                    return;
+                }
+                rcaData = { failureMode, why1, why2, why3, why4, why5 };
+            }
+
+            store.updateWorkOrder(woId, { 
+                status: 'completada', 
+                completedDate: store.today(), 
+                actualHours: hours, 
+                notes,
+                ...rcaData
+            });
+
             document.querySelectorAll('.spare-check:checked').forEach(cb => {
                 const qty = document.querySelector(`.spare-qty[data-item-id="${cb.dataset.itemId}"]`).value;
                 store.deductInventory(cb.dataset.itemId, qty, woId, `OT ${woId.substring(0, 8).toUpperCase()}`);
@@ -930,26 +1150,47 @@ class App {
             store.addLog({ action: 'wo_completed', message: 'OT completada: ' + woId.substring(0, 8).toUpperCase() });
             this.toast('Orden completada — Inventario actualizado');
             this.closeModal();
-            if (onDone) onDone(); else this.renderWorkOrders();
+            if (onDone) onDone(); else this.navigate(this.currentView);
         });
     }
 
-    showWOForm(editId) {
+    showWOForm(editId, faultReport) {
         const w = editId ? store.getWorkOrder(editId) : {};
+        // Pre-fill from fault report if provided
+        const fr = faultReport || {};
+        const prefillAsset = fr.assetId || w.assetId || '';
+        const prefillType = fr.assetId ? 'correctivo' : (w.type || '');
+        const prefillPriority = fr.priority || w.priority || '';
+        const prefillDesc = fr.assetId
+            ? `🔧 OT Correctiva por reporte de avería:\n${fr.description || ''}\nReportado por: ${fr.reportedBy || 'N/A'} — Fecha: ${fr.reportedDate || ''}`
+            : (w.description || '');
+
         const assets = store.getAssets(); const personnel = store.getPersonnel();
         const html = `
-        <div class="form-row"><div class="form-group"><label class="form-label">Equipo <span class="required">*</span></label><select class="form-control" id="fWOAsset"><option value="">Seleccionar...</option>${assets.map(a => `<option value="${a.id}" ${w.assetId === a.id ? 'selected' : ''}>${a.code} - ${a.name}</option>`).join('')}</select></div>
-            <div class="form-group"><label class="form-label">Tipo</label><select class="form-control" id="fWOType"><option value="correctivo" ${w.type === 'correctivo' ? 'selected' : ''}>Correctivo</option><option value="preventivo" ${w.type === 'preventivo' ? 'selected' : ''}>Preventivo</option><option value="predictivo" ${w.type === 'predictivo' ? 'selected' : ''}>Predictivo</option><option value="mejora" ${w.type === 'mejora' ? 'selected' : ''}>Mejora</option></select></div></div>
-        <div class="form-row"><div class="form-group"><label class="form-label">Prioridad</label><select class="form-control" id="fWOPriority"><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></div>
+        ${fr.assetId ? `<div class="fault-report-header" style="margin-bottom:16px"><i class="fas fa-triangle-exclamation"></i><div><strong>OT basada en Reporte de Avería</strong><p style="margin:0;font-size:0.82rem;color:var(--text-muted)">Equipo: ${fr.assetName} · Reportado por: ${fr.reportedBy}</p></div></div>` : ''}
+        <div class="form-row"><div class="form-group"><label class="form-label">Equipo <span class="required">*</span></label><select class="form-control" id="fWOAsset"><option value="">Seleccionar...</option>${assets.map(a => `<option value="${a.id}" ${prefillAsset === a.id ? 'selected' : ''}>${a.code} - ${a.name}</option>`).join('')}</select></div>
+            <div class="form-group"><label class="form-label">Tipo</label><select class="form-control" id="fWOType"><option value="correctivo" ${prefillType === 'correctivo' ? 'selected' : ''}>Correctivo</option><option value="preventivo" ${prefillType === 'preventivo' ? 'selected' : ''}>Preventivo</option><option value="predictivo" ${prefillType === 'predictivo' ? 'selected' : ''}>Predictivo</option><option value="mejora" ${prefillType === 'mejora' ? 'selected' : ''}>Mejora</option></select></div></div>
+        <div class="form-row"><div class="form-group"><label class="form-label">Prioridad</label><select class="form-control" id="fWOPriority"><option value="baja" ${prefillPriority === 'baja' ? 'selected' : ''}>Baja</option><option value="media" ${prefillPriority === 'media' ? 'selected' : ''}>Media</option><option value="alta" ${prefillPriority === 'alta' ? 'selected' : ''}>Alta</option><option value="critica" ${prefillPriority === 'critica' ? 'selected' : ''}>Crítica</option></select></div>
             <div class="form-group"><label class="form-label">Asignado a</label><select class="form-control" id="fWOAssigned"><option value="">Sin asignar</option>${personnel.map(p => `<option value="${p.id}" ${w.assignedTo === p.id ? 'selected' : ''}>${p.name} — ${this.fmtMoney(p.hourlyRate)}/h</option>`).join('')}</select></div></div>
-        <div class="form-group"><label class="form-label">Descripción <span class="required">*</span></label><textarea class="form-control" id="fWODesc" rows="3">${w.description || ''}</textarea></div>
-        <div class="form-row"><div class="form-group"><label class="form-label">Horas Estimadas</label><input class="form-control" type="number" id="fWOEstHours" value="${w.estimatedHours || ''}"></div>
+        <div class="form-group"><label class="form-label">Descripción <span class="required">*</span></label><textarea class="form-control" id="fWODesc" rows="3">${prefillDesc}</textarea></div>
+        <div class="form-row"><div class="form-group"><label class="form-label">Horas Estimadas</label><input class="form-control" type="number" id="fWOEstHours" value="${w.estimatedHours || (fr.assetId ? '4' : '')}"></div>
             <div class="form-group"><label class="form-label">Notas</label><input class="form-control" id="fWONotes" value="${w.notes || ''}"></div></div>`;
-        this.showModal(editId ? 'Editar OT' : 'Nueva Orden de Trabajo', html, () => {
+        this.showModal(editId ? 'Editar OT' : (fr.assetId ? '🔧 Crear OT Correctiva — Reporte de Avería' : 'Nueva Orden de Trabajo'), html, () => {
             const data = { assetId: document.getElementById('fWOAsset').value, type: document.getElementById('fWOType').value, priority: document.getElementById('fWOPriority').value, assignedTo: document.getElementById('fWOAssigned').value, description: document.getElementById('fWODesc').value, estimatedHours: document.getElementById('fWOEstHours').value, notes: document.getElementById('fWONotes').value };
             if (!data.assetId || !data.description) { this.toast('Equipo y Descripción son obligatorios', 'danger'); return; }
             if (editId) { store.updateWorkOrder(editId, data); this.toast('OT actualizada'); }
-            else { data.status = 'pendiente'; data.createdDate = store.today(); store.addWorkOrder(data); store.addLog({ action: 'wo_created', message: `OT creada: ${data.description.substring(0, 50)}` }); this.toast('OT creada'); }
+            else {
+                data.status = 'pendiente'; data.createdDate = store.today();
+                const newWO = store.addWorkOrder(data);
+                store.addLog({ action: 'wo_created', message: `OT creada: ${data.description.substring(0, 50)}` });
+                // If created from a fault report, mark it as resolved
+                if (fr.id && store.resolveFaultReport) {
+                    store.resolveFaultReport(fr.id, newWO.id);
+                    this.toast('✅ OT creada y reporte de avería gestionado', 'success');
+                } else {
+                    this.toast('OT creada');
+                }
+            }
             this.closeModal(); this.renderWorkOrders();
         });
     }
@@ -1335,7 +1576,20 @@ class App {
         </div>
         <div class="grid-2">
             <div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-history"></i> Historial</div></div>
-                ${wos.length === 0 ? '<div class="empty-state" style="padding:30px"><i class="fas fa-clipboard-list"></i><h3>Sin historial</h3></div>' : `<div class="timeline">${wos.map(w => `<div class="timeline-item"><div class="timeline-date">${this.fmtDate(w.createdDate)}${w.completedDate ? ' → ' + this.fmtDate(w.completedDate) : ''}</div><div class="timeline-content">${this.statusBadge(w.status)} <span class="badge badge-${w.type === 'correctivo' ? 'danger' : 'success'}">${typeLabels[w.type]}</span> ${this.priorityBadge(w.priority)}<div style="font-weight:500;margin-top:4px">${w.description}</div><div style="font-size:0.78rem;color:var(--text-muted)"><i class="fas fa-user"></i> ${this.getPersonName(w.assignedTo)} · Est: ${w.estimatedHours || '—'}h / Real: ${w.actualHours || '—'}h</div></div></div>`).join('')}</div>`}
+                ${wos.length === 0 ? '<div class="empty-state" style="padding:30px"><i class="fas fa-clipboard-list"></i><h3>Sin historial</h3></div>' : `<div class="timeline">${wos.map(w => {
+                    const rcaBox = w.failureMode ? `
+                    <div class="rca-box" style="margin-top:8px;padding:8px 12px;background:rgba(255,82,82,0.06);border-left:3px solid var(--danger);border-radius:4px">
+                        <div style="font-size:0.8rem;font-weight:600;color:var(--danger);margin-bottom:4px"><i class="fas fa-search-minus"></i> Causa Raíz (5 Porqués) — Modo: ${w.failureMode}</div>
+                        <ol style="margin:0;padding-left:16px;font-size:0.78rem;color:var(--text-secondary)">
+                            <li>${w.why1 || ''}</li>
+                            ${w.why2 ? `<li>${w.why2}</li>` : ''}
+                            ${w.why3 ? `<li>${w.why3}</li>` : ''}
+                            ${w.why4 ? `<li>${w.why4}</li>` : ''}
+                            ${w.why5 ? `<li>${w.why5}</li>` : ''}
+                        </ol>
+                    </div>` : '';
+                    return `<div class="timeline-item"><div class="timeline-date">${this.fmtDate(w.createdDate)}${w.completedDate ? ' → ' + this.fmtDate(w.completedDate) : ''}</div><div class="timeline-content">${this.statusBadge(w.status)} <span class="badge badge-${w.type === 'correctivo' ? 'danger' : 'success'}">${typeLabels[w.type]}</span> ${this.priorityBadge(w.priority)}<div style="font-weight:500;margin-top:4px">${w.description}</div><div style="font-size:0.78rem;color:var(--text-muted)"><i class="fas fa-user"></i> ${this.getPersonName(w.assignedTo)} · Est: ${w.estimatedHours || '—'}h / Real: ${w.actualHours || '—'}h</div>${rcaBox}</div></div>`;
+                }).join('')}</div>`}
             </div>
             <div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-calendar-check"></i> Planes Preventivos</div></div>
                 ${plans.length === 0 ? '<div class="empty-state" style="padding:30px"><i class="fas fa-calendar"></i><h3>Sin planes</h3></div>' : `<ul class="recent-list">${plans.map(p => { const overdue = p.nextExecution && p.nextExecution < today && p.status === 'activo'; return `<li class="recent-item"><div class="recent-icon" style="background:${overdue ? 'var(--danger-bg)' : 'var(--primary-glow)'};color:${overdue ? 'var(--danger)' : 'var(--primary)'}"><i class="fas ${overdue ? 'fa-exclamation' : 'fa-wrench'}"></i></div><div class="recent-info"><div class="recent-title">${p.name}</div><div class="recent-meta">${overdue ? '<span style="color:var(--danger)">VENCIDO · </span>' : ''}Cada ${p.frequency} ${p.frequencyUnit} · Próxima: ${this.fmtDate(p.nextExecution)}</div></div></li>`; }).join('')}</ul>`}
@@ -1738,6 +1992,240 @@ class App {
 
         doc.save(`OT-${woId.substring(0,8).toUpperCase()}_${asset?.code || 'EQU'}_${store.today()}.pdf`);
         this.toast('\uD83D\uDCC4 PDF generado correctamente', 'success');
+    }
+
+    // ========================================================
+    //  SOLICITUDES DE TRABAJO (Work Requests)
+    // ========================================================
+    renderRequests() {
+        const el = document.getElementById('view-requests');
+        if (!el) return;
+        const requests = store.getWorkRequests();
+
+        el.innerHTML = `
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <div class="search-input"><i class="fas fa-search"></i><input type="text" id="reqSearch" placeholder="Buscar solicitudes..."></div>
+                <select class="filter-select" id="reqStatusFilter">
+                    <option value="">Todos los estados</option>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="aprobada">Aprobada</option>
+                    <option value="rechazada">Rechazada</option>
+                </select>
+            </div>
+            <div class="toolbar-right">
+                <button class="btn btn-primary" id="btnNewRequest"><i class="fas fa-plus"></i> Nueva Solicitud</button>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Código/ID</th>
+                        <th>Equipo</th>
+                        <th>Descripción</th>
+                        <th>Prioridad Sugerida</th>
+                        <th>Solicitante</th>
+                        <th>Fecha Solicitud</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="reqTableBody">
+                    ${this.renderRequestsRows(requests)}
+                </tbody>
+            </table>
+        </div>`;
+
+        document.getElementById('btnNewRequest').addEventListener('click', () => this.showRequestForm());
+        document.getElementById('reqSearch').addEventListener('input', () => this.filterRequests());
+        document.getElementById('reqStatusFilter').addEventListener('change', () => this.filterRequests());
+        this.bindRequestActions();
+    }
+
+    renderRequestsRows(requests) {
+        if (requests.length === 0) return '<tr><td colspan="8"><div class="empty-state"><i class="fas fa-envelope-open-text"></i><h3>Sin solicitudes de trabajo</h3></div></td></tr>';
+        return requests.map(r => {
+            const asset = store.getAsset(r.assetId);
+            const statusLabels = { pendiente: 'Pendiente', aprobada: 'Aprobada', rechazada: 'Rechazada' };
+            const statusCls = { pendiente: 'warning', aprobada: 'success', rechazada: 'muted' };
+            return `
+            <tr>
+                <td><strong>#${r.id.substring(0, 8).toUpperCase()}</strong></td>
+                <td>${asset ? asset.name : 'Desconocido'} (${asset ? asset.code : '—'})</td>
+                <td>${r.description || '—'}</td>
+                <td>${this.priorityBadge(r.priority)}</td>
+                <td>${r.requester || '—'}</td>
+                <td>${this.fmtDate(r.requestDate)}</td>
+                <td><span class="badge badge-${statusCls[r.status]} badge-dot">${statusLabels[r.status]}</span></td>
+                <td>
+                    <div class="action-btns">
+                        ${r.status === 'pendiente' ? `
+                            <button class="btn btn-sm btn-success" data-appreq="${r.id}" data-tooltip="Aprobar"><i class="fas fa-check"></i></button>
+                            <button class="btn btn-sm btn-danger" data-rejreq="${r.id}" data-tooltip="Rechazar"><i class="fas fa-times"></i></button>
+                        ` : ''}
+                        <button class="btn btn-icon btn-sm" data-delreq="${r.id}"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    filterRequests() {
+        const q = (document.getElementById('reqSearch')?.value || '').toLowerCase();
+        const st = document.getElementById('reqStatusFilter')?.value || '';
+        let requests = store.getWorkRequests();
+        if (q) requests = requests.filter(r => {
+            const asset = store.getAsset(r.assetId);
+            return (r.description + (asset ? asset.name : '') + r.requester + r.id).toLowerCase().includes(q);
+        });
+        if (st) requests = requests.filter(r => r.status === st);
+        document.getElementById('reqTableBody').innerHTML = this.renderRequestsRows(requests);
+        this.bindRequestActions();
+    }
+
+    bindRequestActions() {
+        document.querySelectorAll('[data-appreq]').forEach(b => b.addEventListener('click', () => this.showApproveRequestModal(b.dataset.appreq)));
+        document.querySelectorAll('[data-rejreq]').forEach(b => b.addEventListener('click', () => {
+            this.confirmAction('Esta solicitud será rechazada.', () => {
+                store.updateWorkRequest(b.dataset.rejreq, { status: 'rechazada' });
+                store.addLog({ action: 'system', message: `Solicitud de trabajo rechazada: #${b.dataset.rejreq.substring(0,8).toUpperCase()}` });
+                this.toast('Solicitud rechazada', 'warning');
+                this.renderRequests();
+            });
+        }));
+        document.querySelectorAll('[data-delreq]').forEach(b => b.addEventListener('click', () => {
+            this.confirmAction('Esta solicitud será eliminada permanentemente.', () => {
+                store.deleteWorkRequest(b.dataset.delreq);
+                this.toast('Solicitud eliminada', 'danger');
+                this.renderRequests();
+            });
+        }));
+    }
+
+    showRequestForm() {
+        const assets = store.getAssets();
+        const html = `
+        <div class="form-group">
+            <label class="form-label">Equipo / Activo <span class="required">*</span></label>
+            <select class="form-control" id="fReqAsset">
+                <option value="">Seleccionar equipo...</option>
+                ${assets.map(a => `<option value="${a.id}">${a.code} - ${a.name}</option>`).join('')}
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Descripción del Problema / Trabajo <span class="required">*</span></label>
+            <textarea class="form-control" id="fReqDesc" rows="3" placeholder="Describe brevemente el problema detectado o la tarea requerida..."></textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Prioridad Sugerida</label>
+                <select class="form-control" id="fReqPriority">
+                    <option value="baja">Baja</option>
+                    <option value="media" selected>Media</option>
+                    <option value="alta">Alta</option>
+                    <option value="critica">Crítica</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Solicitante <span class="required">*</span></label>
+                <input class="form-control" id="fReqRequester" placeholder="Nombre o cargo (ej. Operador Turno A)" value="Operador Planta">
+            </div>
+        </div>`;
+
+        this.showModal('Nueva Solicitud de Trabajo', html, () => {
+            const assetId = document.getElementById('fReqAsset').value;
+            const description = document.getElementById('fReqDesc').value.trim();
+            const priority = document.getElementById('fReqPriority').value;
+            const requester = document.getElementById('fReqRequester').value.trim();
+
+            if (!assetId || !description || !requester) {
+                this.toast('Todos los campos con asterisco son obligatorios', 'danger');
+                return;
+            }
+
+            store.addWorkRequest({
+                assetId,
+                description,
+                priority,
+                requester,
+                requestDate: store.today(),
+                status: 'pendiente'
+            });
+
+            store.addLog({ action: 'system', message: `Nueva solicitud de trabajo creada por ${requester}` });
+            this.toast('Solicitud registrada correctamente');
+            this.closeModal();
+            this.renderRequests();
+        });
+    }
+
+    showApproveRequestModal(reqId) {
+        const req = store.getWorkRequest(reqId);
+        if (!req) return;
+        const personnel = store.getPersonnel();
+        const asset = store.getAsset(req.assetId);
+
+        const html = `
+        <div style="margin-bottom:16px;background:var(--primary-glow);padding:10px;border-radius:var(--radius-sm);font-size:0.85rem">
+            <strong>Solicitud #${req.id.substring(0, 8).toUpperCase()}</strong><br>
+            Equipo: ${asset ? asset.name : 'Desconocido'}<br>
+            Problema: <em>"${req.description}"</em>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Técnico Asignado <span class="required">*</span></label>
+            <select class="form-control" id="fApproveTech">
+                <option value="">Seleccionar técnico...</option>
+                ${personnel.map(p => `<option value="${p.id}">${p.name} — ${p.role}</option>`).join('')}
+            </select>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Prioridad Definitiva</label>
+                <select class="form-control" id="fApprovePriority">
+                    <option value="baja" ${req.priority === 'baja' ? 'selected' : ''}>Baja</option>
+                    <option value="media" ${req.priority === 'media' ? 'selected' : ''}>Media</option>
+                    <option value="alta" ${req.priority === 'alta' ? 'selected' : ''}>Alta</option>
+                    <option value="critica" ${req.priority === 'critica' ? 'selected' : ''}>Crítica</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Horas Estimadas <span class="required">*</span></label>
+                <input class="form-control" type="number" id="fApproveEstHours" value="2" min="0.5" step="0.5">
+            </div>
+        </div>`;
+
+        this.showModal('Aprobar Solicitud y Crear OT', html, () => {
+            const assignedTo = document.getElementById('fApproveTech').value;
+            const priority = document.getElementById('fApprovePriority').value;
+            const estimatedHours = document.getElementById('fApproveEstHours').value;
+
+            if (!assignedTo || !estimatedHours) {
+                this.toast('Técnico y horas estimadas son requeridos', 'danger');
+                return;
+            }
+
+            // Update request
+            store.updateWorkRequest(reqId, { status: 'aprobada' });
+
+            // Create OT
+            store.addWorkOrder({
+                assetId: req.assetId,
+                type: 'correctivo',
+                priority,
+                status: 'pendiente',
+                assignedTo,
+                description: `🔧 [Basado en Solicitud #${reqId.substring(0,8).toUpperCase()}] ${req.description}`,
+                estimatedHours,
+                createdDate: store.today()
+            });
+
+            store.addLog({ action: 'wo_created', message: `OT correctiva creada desde solicitud #${reqId.substring(0,8).toUpperCase()}` });
+            this.toast('Solicitud aprobada y OT correctiva generada', 'success');
+            this.closeModal();
+            this.renderRequests();
+        });
     }
 }
 

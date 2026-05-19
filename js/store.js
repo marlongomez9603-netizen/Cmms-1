@@ -29,13 +29,15 @@ try {
 }
 
 class DataStore {
-    constructor(cedula) {
+    constructor(cedula, options = {}) {
         this.cedula = cedula;
         this.STORAGE_KEY = `maintpro_${cedula}`;
         this.db = _fbDb;  // referencia global a Firestore
         this._cloudRef = this.db
             ? this.db.collection('students').doc(String(cedula))
             : null;
+        this._lastSaveTimestamp = 0;  // prevent circular snapshot triggers
+        this._unsubscribeSnapshot = null;  // Firestore listener handle
 
         // 1. Intentar cargar de localStorage (rápido, sincrónico)
         this.data = this.load();
@@ -47,8 +49,13 @@ class DataStore {
         } else {
             // Datos locales ok → migrar y sincronizar en background
             this._migrate();
-            this.currentCompanyId = this.data.companies[0].id;
+            this.currentCompanyId = this.data ? this.data.companies[0].id : null;
             this._syncToCloud();  // actualizar Firestore en background
+        }
+
+        // 3. Start real-time listener ONLY for the main store (not temp instances)
+        if (options.listen) {
+            this._startRealtimeListener();
         }
     }
 
@@ -136,9 +143,83 @@ class DataStore {
     /** Sincroniza el estado actual a Firestore (background, no bloquea) */
     _syncToCloud() {
         if (!this._cloudRef || !this.data) return;
-        // Usamos set() con merge para no sobrescribir campos que pueda tener el docente
+        this._lastSaveTimestamp = Date.now();
         this._cloudRef.set(this.data)
             .catch(e => console.warn('[MaintPro] Error sync Firestore:', e.message));
+    }
+
+    /** Real-time listener: detects remote changes (teacher fault injection, purchase approvals) */
+    _startRealtimeListener() {
+        if (!this._cloudRef) return;
+        this._unsubscribeSnapshot = this._cloudRef.onSnapshot(snap => {
+            // Ignore snapshots triggered by our own save (within 3 seconds)
+            if (Date.now() - this._lastSaveTimestamp < 3000) return;
+            if (!snap.exists) return;
+            const remoteData = snap.data();
+            if (!remoteData || !remoteData.companies) return;
+
+            // Check if remote has new injected alerts we haven't seen
+            const localAlerts = (this.data?.injectedAlerts || []).map(a => a.id);
+            const remoteAlerts = (remoteData.injectedAlerts || []);
+            const newAlerts = remoteAlerts.filter(a => !localAlerts.includes(a.id));
+
+            // Check if remote has more work orders (fault injected)
+            const localWOCount = (this.data?.workOrders || []).length;
+            const remoteWOCount = (remoteData.workOrders || []).length;
+
+            // Check if asset statuses changed (fuera_de_servicio)
+            const localDownAssets = (this.data?.assets || []).filter(a => a.status === 'fuera_de_servicio').length;
+            const remoteDownAssets = (remoteData.assets || []).filter(a => a.status === 'fuera_de_servicio').length;
+
+            // Check for purchase status changes (approved/rejected)
+            const localApproved = (this.data?.purchases || []).filter(p => p.status === 'aprobada').length;
+            const remoteApproved = (remoteData.purchases || []).filter(p => p.status === 'aprobada').length;
+            const localCancelled = (this.data?.purchases || []).filter(p => p.status === 'cancelada').length;
+            const remoteCancelled = (remoteData.purchases || []).filter(p => p.status === 'cancelada').length;
+
+            // Check for new notifications
+            const localNotifCount = (this.data?.notifications || []).length;
+            const remoteNotifCount = (remoteData.notifications || []).length;
+
+            const hasChanges = newAlerts.length > 0 ||
+                               remoteWOCount !== localWOCount ||
+                               remoteDownAssets !== localDownAssets ||
+                               remoteApproved !== localApproved ||
+                               remoteCancelled !== localCancelled ||
+                               remoteNotifCount !== localNotifCount;
+
+            if (hasChanges) {
+                console.info('[MaintPro] 🔄 Cambio remoto detectado — actualizando datos...');
+                this.data = remoteData;
+                this._migrate();
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.data));
+                this.currentCompanyId = this.data.companies[0].id;
+
+                // Build change context for the app
+                const changeContext = {
+                    newAlerts,
+                    purchaseApproved: remoteApproved > localApproved,
+                    purchaseRejected: remoteCancelled > localCancelled,
+                    newWorkOrders: remoteWOCount > localWOCount,
+                    assetsDown: remoteDownAssets > localDownAssets
+                };
+
+                // Notify the app to refresh the current view
+                if (window.app && typeof window.app._onRemoteUpdate === 'function') {
+                    window.app._onRemoteUpdate(newAlerts, changeContext);
+                }
+            }
+        }, err => {
+            console.warn('[MaintPro] Snapshot listener error:', err.message);
+        });
+    }
+
+    /** Stop listening (called on logout) */
+    stopListening() {
+        if (this._unsubscribeSnapshot) {
+            this._unsubscribeSnapshot();
+            this._unsubscribeSnapshot = null;
+        }
     }
 
     /** Fuerza recuperar los datos desde Firestore (útil si el docente hizo cambios remotos) */
@@ -256,6 +337,9 @@ class DataStore {
 
     addWorkOrder(wo) {
         const result = this._add('workOrders', wo);
+        if (result && result.status === 'completada') {
+            this._deductInventoryForWO(result);
+        }
         if (wo.assignedTo && !wo.skipNotify) {
             const asset = this.getAsset(wo.assetId);
             this.addNotification({
@@ -271,7 +355,11 @@ class DataStore {
 
     updateWorkOrder(id, u) {
         const old = this.getWorkOrder(id);
+        const oldStatus = old ? old.status : null;
         const result = this._update('workOrders', id, u);
+        if (result && result.status === 'completada' && oldStatus !== 'completada') {
+            this._deductInventoryForWO(result);
+        }
         if (u.assignedTo && u.assignedTo !== old?.assignedTo) {
             const asset = this.getAsset(old?.assetId);
             this.addNotification({
@@ -286,6 +374,13 @@ class DataStore {
     }
 
     deleteWorkOrder(id) { this._delete('workOrders', id); }
+
+    _deductInventoryForWO(wo) {
+        if (!wo.partsUsed || !Array.isArray(wo.partsUsed)) return;
+        wo.partsUsed.forEach(part => {
+            this.deductInventory(part.itemId, part.quantity, wo.id, `Consumo OT ${wo.id.substring(0, 8).toUpperCase()}`);
+        });
+    }
 
     // ---------- Notifications ----------
     addNotification(notif) {
@@ -328,6 +423,13 @@ class DataStore {
             .forEach(n => n.read = true);
         this.save();
     }
+
+    // ---------- Work Requests (Solicitudes) ----------
+    getWorkRequests() { return this._getCollection('workRequests'); }
+    getWorkRequest(id) { return this._getById('workRequests', id); }
+    addWorkRequest(req) { return this._add('workRequests', req); }
+    updateWorkRequest(id, u) { return this._update('workRequests', id, u); }
+    deleteWorkRequest(id) { this._delete('workRequests', id); }
 
     // ---------- Preventive Plans ----------
     getPreventivePlans() { return this._getCollection('preventivePlans'); }
@@ -512,19 +614,47 @@ class DataStore {
         const planCompliance = totalPlannedPMs > 0 ? Math.round((pmWOs.length / totalPlannedPMs) * 100) : 0;
 
         // Cost Analysis
-        const laborCost = completed.reduce((sum, w) => {
-            const hours = parseFloat(w.actualHours) || parseFloat(w.estimatedHours) || 0;
-            const tech = this.getPersonnelById(w.assignedTo);
-            const rate = tech ? (parseFloat(tech.hourlyRate) || 25000) : 25000;
-            return sum + (hours * rate);
-        }, 0);
+        let laborCost = 0;
+        let partsCost = 0;
+        let costByType = { correctivo: 0, preventivo: 0, predictivo: 0, mejora: 0 };
+        let costByAsset = {};
 
-        const partsCost = this.getAllMovements()
-            .filter(m => m.type === 'salida')
-            .reduce((sum, m) => {
-                const item = this.getInventoryItem(m.itemId);
-                return sum + ((parseFloat(m.quantity) || 0) * (parseFloat(item?.unitCost) || 0));
-            }, 0);
+        completed.forEach(w => {
+            const hours = parseFloat(w.actualHours) || parseFloat(w.estimatedHours) || 0;
+            const tech = w.assignedTo ? this.getPersonnelById(w.assignedTo) : null;
+            const rate = tech ? (parseFloat(tech.hourlyRate) || 25000) : 25000;
+            const labor = hours * rate;
+            laborCost += labor;
+
+            let parts = 0;
+            if (w.partsUsed && Array.isArray(w.partsUsed)) {
+                parts = w.partsUsed.reduce((sum, p) => sum + ((parseFloat(p.quantity) || 0) * (parseFloat(p.unitCost) || 0)), 0);
+            }
+            partsCost += parts;
+
+            const woCost = labor + parts;
+            if (costByType[w.type] !== undefined) {
+                costByType[w.type] += woCost;
+            }
+            if (!costByAsset[w.assetId]) costByAsset[w.assetId] = 0;
+            costByAsset[w.assetId] += woCost;
+        });
+
+        // Conteo de Modos de Falla (para diagrama de Pareto)
+        let failureModesCount = {
+            'mecánico': 0, 'eléctrico': 0, 'hidráulico': 0, 'neumático': 0,
+            'lubricación': 0, 'desgaste': 0, 'operación': 0, 'otro': 0
+        };
+        completed.filter(w => w.type === 'correctivo').forEach(w => {
+            const mode = w.failureMode || 'otro';
+            if (failureModesCount[mode] !== undefined) {
+                failureModesCount[mode]++;
+            } else {
+                failureModesCount['otro']++;
+            }
+        });
+
+        const pendingRequests = this.getWorkRequests().filter(r => r.status === 'pendiente').length;
 
         // Pending purchases
         const pendingPurchases = this.getPurchases().filter(p => p.status === 'pendiente').length;
@@ -552,6 +682,10 @@ class DataStore {
             totalCost: laborCost + partsCost,
             pendingPurchases,
             pendingManagerPurchases,
+            pendingRequests,
+            costByType,
+            costByAsset,
+            failureModesCount,
             woByType: {
                 correctivo: wos.filter(w => w.type === 'correctivo').length,
                 preventivo: wos.filter(w => w.type === 'preventivo').length,
@@ -576,12 +710,18 @@ class DataStore {
         const lastWO = completed.sort((a, b) => (b.completedDate || '').localeCompare(a.completedDate || ''))[0];
 
         // Cost for this asset
-        const laborCost = completed.reduce((sum, w) => {
+        let laborCost = 0;
+        let partsCost = 0;
+        completed.forEach(w => {
             const hours = parseFloat(w.actualHours) || parseFloat(w.estimatedHours) || 0;
             const tech = this.getPersonnelById(w.assignedTo);
             const rate = tech ? (parseFloat(tech.hourlyRate) || 25000) : 25000;
-            return sum + (hours * rate);
-        }, 0);
+            laborCost += hours * rate;
+
+            if (w.partsUsed && Array.isArray(w.partsUsed)) {
+                partsCost += w.partsUsed.reduce((sum, p) => sum + ((parseFloat(p.quantity) || 0) * (parseFloat(p.unitCost) || 0)), 0);
+            }
+        });
 
         return {
             totalWOs: wos.length,
@@ -594,6 +734,8 @@ class DataStore {
             correctiveCount: wos.filter(w => w.type === 'correctivo').length,
             preventiveCount: wos.filter(w => w.type === 'preventivo').length,
             laborCost,
+            partsCost,
+            totalCost: laborCost + partsCost
         };
     }
 
@@ -601,35 +743,78 @@ class DataStore {
     injectFailure(assetId, description, priority) {
         const asset = this.getAsset(assetId);
         if (!asset) return null;
-        const wo = this.addWorkOrder({
-            assetId,
-            type: 'correctivo',
-            priority: priority || 'critica',
-            status: 'pendiente',
-            description: description || `⚠️ AVERÍA SIMULADA: ${asset.name} — Falla crítica detectada`,
-            createdDate: this.today(),
-            estimatedHours: '4',
-            injected: true,
-            companyId: this.currentCompanyId
-        });
+
+        // 1. Cambiar estado del equipo a fuera_de_servicio (NO crear OT)
         this.updateAsset(assetId, { status: 'fuera_de_servicio' });
+
+        // 2. Crear reporte de avería (el estudiante debe crear la OT)
+        if (!this.data.faultReports) this.data.faultReports = [];
+        const reportId = this.genId();
+        const report = {
+            id: reportId,
+            companyId: this.currentCompanyId,
+            assetId,
+            assetName: asset.name,
+            assetCode: asset.code,
+            description: description || `Falla crítica detectada en ${asset.name}`,
+            priority: priority || 'critica',
+            reportedBy: 'Docente (Simulación)',
+            reportedDate: this.today(),
+            timestamp: new Date().toISOString(),
+            status: 'pendiente'  // pendiente = esperando que el Jefe cree la OT
+        };
+        this.data.faultReports.push(report);
+
+        // 3. Log de actividad
         this.addLog({
             action: 'fault_injected',
-            message: `⚠️ Falla inyectada por docente: ${asset.name}`
+            message: `⚠️ Falla reportada por docente: ${asset.name} — Requiere gestión de OT`
         });
-        // Set alert flag for student
+
+        // 4. Alerta visual para el estudiante
         if (!this.data.injectedAlerts) this.data.injectedAlerts = [];
         this.data.injectedAlerts.push({
             id: this.genId(),
             companyId: this.currentCompanyId,
             assetId, assetName: asset.name,
-            woId: wo.id,
-            message: `⚠️ El equipo <strong>${asset.name}</strong> ha presentado una falla crítica. Gestione la OT inmediatamente.`,
+            reportId,
+            message: `⚠️ El equipo <strong>${asset.name}</strong> ha presentado una falla ${priority || 'crítica'}. <strong>Debe crear una OT correctiva.</strong>`,
             timestamp: new Date().toISOString(),
             seen: false
         });
+
+        // 5. Notificación persistente
+        this.addNotification({
+            techId: null,
+            message: `🔧 AVERÍA: ${asset.name} (${asset.code}) está fuera de servicio. Cree una OT correctiva desde Órdenes de Trabajo.`,
+            type: 'fault_injected',
+            relatedId: reportId,
+            priority: priority || 'critica'
+        });
+
         this.save();
-        return wo;
+        return report;
+    }
+
+    // ---------- Fault Reports ----------
+    getFaultReports() {
+        return (this.data.faultReports || [])
+            .filter(r => r.companyId === this.currentCompanyId);
+    }
+
+    getPendingFaultReports() {
+        return this.getFaultReports().filter(r => r.status === 'pendiente');
+    }
+
+    resolveFaultReport(reportId, woId) {
+        const report = (this.data.faultReports || []).find(r => r.id === reportId);
+        if (report) {
+            report.status = 'gestionado';
+            report.woId = woId;
+            report.resolvedDate = this.today();
+            this.save();
+        }
+        return report;
     }
 
     getUnseenAlerts() {
@@ -668,5 +853,6 @@ class DataStore {
 let store = null;
 
 function initStore(cedula) {
-    store = new DataStore(cedula);
+    if (store && store.stopListening) store.stopListening();
+    store = new DataStore(cedula, { listen: true });
 }

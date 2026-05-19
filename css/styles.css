@@ -297,7 +297,7 @@ a {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
   min-width: 0;
 }
 
@@ -312,6 +312,9 @@ a {
   justify-content: space-between;
   padding: 0 24px;
   z-index: 50;
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
 }
 
 .topbar-left {
@@ -340,7 +343,6 @@ a {
 /* ---------- Content Area ---------- */
 #content {
   flex: 1;
-  overflow-y: auto;
   padding: 24px;
   background: var(--bg-deepest);
 }
@@ -363,6 +365,16 @@ a {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes flashFade {
+  0% { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* ---------- Cards ---------- */
@@ -2565,17 +2577,20 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .tech-empty-tasks {
   text-align: center;
-  padding: 60px 20px;
+  padding: 60px 20px 100px;
   color: var(--text-muted);
 }
 
 .tech-report-bar {
-  position: sticky;
+  position: fixed;
   bottom: 0;
-  padding: 16px 0;
-  background: linear-gradient(to top, var(--bg-page) 70%, transparent);
+  left: 0;
+  right: 0;
+  padding: 12px 20px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, var(--bg-page) 80%, transparent);
   text-align: center;
-  margin-top: 24px;
+  z-index: 50;
 }
 
 .btn-lg { padding: 14px 32px !important; font-size: 1rem !important; }
@@ -2597,6 +2612,32 @@ input[type="number"]::-webkit-outer-spin-button {
   background: rgba(97,218,251,0.1);
   color: var(--primary);
   border-color: rgba(97,218,251,0.3);
+}
+
+/* Mobile technician toggle (topbar) — hidden on desktop, shown on mobile */
+.btn-tech-mobile {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .btn-tech-mobile {
+    display: inline-flex !important;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    gap: 6px;
+    white-space: nowrap;
+    animation: fadeInUp 0.3s ease;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-tech-mobile {
+    padding: 6px 10px;
+    font-size: 0.72rem;
+  }
+  .btn-tech-mobile .tech-mobile-label {
+    display: none;
+  }
 }
 
 /* Fault report modal */

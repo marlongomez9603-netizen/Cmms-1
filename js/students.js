@@ -405,6 +405,11 @@ function generateStudentData(cedula) {
     const pmRng = createRNG(seed + 300);
     const planTemplates = pickN(pmRng, sector.planTemplates, 2);
     const today = new Date().toISOString().split('T')[0];
+    const offsetDate = (days) => {
+        const d = new Date();
+        d.setDate(d.getDate() + days);
+        return d.toISOString().split('T')[0];
+    };
     const preventivePlans = planTemplates.map((tpl, i) => {
         const assetIdx = i % assets.length;
         const freq = parseInt(tpl.frequency);
@@ -428,20 +433,145 @@ function generateStudentData(cedula) {
         };
     });
 
+    // --- NUEVO: Órdenes de Trabajo pre-pobladas con repuestos y RCA ---
+    const workOrders = [
+        {
+            id: `wo_${cedula}_0`,
+            companyId: company.id,
+            assetId: assets[0].id,
+            type: 'correctivo',
+            priority: 'alta',
+            status: 'completada',
+            description: 'Falla y parada imprevista: Reemplazo de pieza de desgaste principal',
+            assignedTo: personnel[0].id,
+            createdDate: offsetDate(-12),
+            startDate: offsetDate(-12),
+            completedDate: offsetDate(-11),
+            estimatedHours: 4,
+            actualHours: 5,
+            spareParts: '', // Retrocompatibilidad
+            partsUsed: [
+                {
+                    itemId: inventory[0].id,
+                    name: inventory[0].name,
+                    quantity: 1,
+                    unitCost: parseFloat(inventory[0].unitCost) || 120000
+                }
+            ],
+            notes: 'El activo se detuvo intempestivamente. Se verificaron holguras, se reemplazó el repuesto principal y se procedió a lubricar y calibrar el conjunto. Equipo devuelto a operación normal.',
+            // RCA (5 Porqués)
+            failureMode: 'desgaste',
+            why1: 'El equipo se detuvo y activó la alarma de sobrecarga.',
+            why2: 'El eje principal se atascó debido a una fricción excesiva.',
+            why3: 'El rodamiento / componente de desgaste sufrió una degradación acelerada.',
+            why4: 'Faltaba lubricación adecuada en el punto de contacto.',
+            why5: 'El canal de lubricación interna estaba obstruido por partículas metálicas de desgaste anterior que no se removieron en la última limpieza.',
+            rootCause: 'Obstrucción de conductos de lubricación por residuos de desgaste previo no limpiados periódicamente.',
+            correctiveAction: 'Agregar una tarea de lavado y soplado de conductos de lubricación interna en los mantenimientos programados trimestrales.'
+        },
+        {
+            id: `wo_${cedula}_1`,
+            companyId: company.id,
+            assetId: assets[1].id,
+            type: 'preventivo',
+            priority: 'media',
+            status: 'completada',
+            description: 'Mantenimiento Preventivo Planificado - Rutina Trimestral',
+            assignedTo: personnel[1].id,
+            createdDate: offsetDate(-15),
+            startDate: offsetDate(-15),
+            completedDate: offsetDate(-15),
+            estimatedHours: 3,
+            actualHours: 3,
+            spareParts: '',
+            partsUsed: [
+                {
+                    itemId: inventory[1].id,
+                    name: inventory[1].name,
+                    quantity: 2,
+                    unitCost: parseFloat(inventory[1].unitCost) || 45000
+                }
+            ],
+            notes: 'Mantenimiento rutinario ejecutado según el plan. Se reemplazaron consumibles y se limpió el módulo. Parámetros normales.'
+        },
+        {
+            id: `wo_${cedula}_2`,
+            companyId: company.id,
+            assetId: assets[2].id,
+            type: 'correctivo',
+            priority: 'media',
+            status: 'pendiente',
+            description: 'Zumbido intermitente y aumento de vibraciones detectadas',
+            assignedTo: personnel[2].id,
+            createdDate: offsetDate(-1),
+            estimatedHours: 2,
+            partsUsed: [],
+            notes: 'Reportado por inspección visual del operario en el cambio de turno.'
+        }
+    ];
+
+    // Descontar del inventario inicial las piezas consumidas por OTs ya completadas
+    inventory[0].quantity = Math.max(0, parseInt(inventory[0].quantity) - 1).toString();
+    inventory[1].quantity = Math.max(0, parseInt(inventory[1].quantity) - 2).toString();
+
+    // --- NUEVO: Solicitudes de Trabajo Iniciales ---
+    const workRequests = [
+        {
+            id: `req_${cedula}_0`,
+            companyId: company.id,
+            assetId: assets[0].id,
+            title: 'Fallo eléctrico intermitente en panel',
+            description: 'La pantalla del panel de control parpadea y en ocasiones bloquea el encendido. Requiere inspección de cableado y relés.',
+            reportedBy: 'Juan David Castro (Operador)',
+            createdDate: offsetDate(-2),
+            priority: 'alta',
+            status: 'pendiente',
+            rejectionReason: '',
+            woId: ''
+        },
+        {
+            id: `req_${cedula}_1`,
+            companyId: company.id,
+            assetId: assets[1].id,
+            title: 'Fuga de lubricante en sello',
+            description: 'Se observa goteo constante debajo del eje principal. Es necesario intervenir para cambiar sellos antes de que baje el nivel crítico.',
+            reportedBy: 'Diana Restrepo (Supervisora)',
+            createdDate: offsetDate(-12),
+            priority: 'media',
+            status: 'aprobada',
+            rejectionReason: '',
+            woId: `wo_${cedula}_0` // Vinculada al correctivo inicial
+        },
+        {
+            id: `req_${cedula}_2`,
+            companyId: company.id,
+            assetId: assets[2].id,
+            title: 'Ajuste de guardas de protección',
+            description: 'La guarda metálica del lado izquierdo vibra mucho y tiene un tornillo aislado. Requiere soldar o colocar perno nuevo.',
+            reportedBy: 'Pedro Gómez (Operador)',
+            createdDate: offsetDate(-5),
+            priority: 'baja',
+            status: 'rechazada',
+            rejectionReason: 'No es una falla de máquina. El ajuste ya fue realizado por el operador usando herramientas manuales básicas de su estación de trabajo.',
+            woId: ''
+        }
+    ];
+
     return {
         companies: [company],
         assets: assets,
-        workOrders: [],
+        workOrders: workOrders,
         preventivePlans: preventivePlans,
         inventory: inventory,
         personnel: personnel,
+        workRequests: workRequests, // Nueva colección
         activityLog: [
             {
                 id: 'log_init',
                 companyId: company.id,
                 timestamp: new Date().toISOString(),
                 action: 'system',
-                message: `Sistema inicializado para ${student.nombre}`,
+                message: `Sistema inicializado para ${student.nombre}. Datos financieros y RCA activos.`,
                 user: 'Sistema'
             }
         ]
